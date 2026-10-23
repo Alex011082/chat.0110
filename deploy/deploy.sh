@@ -31,6 +31,9 @@ rsync -a --delete \
 ssh "$SERVER" "set -euo pipefail
   mkdir -p $REL.incoming/node_modules/@chat0110
   ln -sfn ../../packages/chat-protocol $REL.incoming/node_modules/@chat0110/chat-protocol
+  # rsync -a переносит права локальной временной папки (на Mac — 700), а сервис
+  # работает от jarvis: без явных прав он не зайдёт в релиз (ловушка 23.10).
+  sudo chmod -R u=rwX,go=rX $REL.incoming
   sudo chown -R root:root $REL.incoming
   sudo rm -rf $REL
   sudo mv $REL.incoming $REL
