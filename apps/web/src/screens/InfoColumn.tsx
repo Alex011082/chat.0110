@@ -1,7 +1,8 @@
-import type { ChatDetail, ForkRef, InheritedContext, TimelineItem } from "@chat0110/chat-protocol";
+import type { ChatDetail, Decision, ForkRef, InheritedContext, TimelineItem } from "@chat0110/chat-protocol";
 import { useMemo } from "react";
 import { useCopy } from "../hooks.ts";
 import { agentLinkPhrase } from "../lib/chat.ts";
+import { awaitsHuman, statusLabel } from "../lib/decision.ts";
 import { messageRef } from "../lib/fork.ts";
 import { chatRoute, splitRepo } from "../lib/route.ts";
 import { plural } from "../lib/text.ts";
@@ -10,6 +11,7 @@ import { countTimeline } from "../lib/timeline.ts";
 import { forms, s } from "../strings.ts";
 import { AppLink } from "../ui/AppLink.tsx";
 import { Body, cx, Grille, Key, Lamp, Plate, Screen } from "../ui/kit.tsx";
+import { DecisionGlyph, whenShort } from "./DecisionCard.tsx";
 
 interface InfoProps {
   chat: ChatDetail;
@@ -18,10 +20,16 @@ interface InfoProps {
   forks: ForkRef[];
   inherited: InheritedContext | null;
   parentTitle: string | null;
+  decisions: Decision[];
+  /** Предложения этого Fork родителю. */
+  outgoing: Decision[];
+  /** Переход к карточке в ленте: на телефоне и планшете панель закрывается. */
+  onJump: () => void;
+  onPropose: (() => void) | null;
 }
 
-/** Правая колонка: участники, ветвления, ссылка для агента, паспорт чата. */
-export function InfoColumn({ chat, items, now, forks, inherited, parentTitle }: InfoProps) {
+/** Правая колонка: участники, решения, ветвления, ссылка для агента, паспорт чата. */
+export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, decisions, outgoing, onJump, onPropose }: InfoProps) {
   const counts = useMemo(() => countTimeline(items), [items]);
   const owner = chat.created_by.toLowerCase();
   const participants = useMemo(
@@ -60,6 +68,12 @@ export function InfoColumn({ chat, items, now, forks, inherited, parentTitle }: 
           })}
         </ul>
       </Plate>
+
+      <Decisions chat={chat} decisions={decisions} now={now} onJump={onJump} />
+
+      {chat.parent ? (
+        <Proposals chat={chat} outgoing={outgoing} parentTitle={parentTitle} now={now} onPropose={onPropose} />
+      ) : null}
 
       <Branches chat={chat} items={items} forks={forks} inherited={inherited} parentTitle={parentTitle} />
 
@@ -177,6 +191,101 @@ function Branches({
           </ul>
         ) : null}
       </div>
+    </Plate>
+  );
+}
+
+/** Ждущие человека — сверху, дальше свежие первыми. */
+function byAttention(a: Decision, b: Decision): number {
+  return Number(awaitsHuman(b.status)) - Number(awaitsHuman(a.status)) || (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0);
+}
+
+function DecisionRow({ d, to, hash, meta, onClick }: { d: Decision; to: ReturnType<typeof chatRoute>; hash: string; meta: string; onClick?: () => void }) {
+  return (
+    <AppLink to={to} hash={hash} onClick={onClick} className={ROW_LINK}>
+      <span className="flex items-start gap-2.5">
+        <span className="pt-[3px]">
+          <DecisionGlyph status={d.status} />
+        </span>
+        <span className="min-w-0 text-key leading-snug font-semibold [overflow-wrap:anywhere]">{d.title}</span>
+      </span>
+      <span className={cx("pl-[24px] text-cap", awaitsHuman(d.status) ? "text-action-ink" : "text-ink-2")}>{meta}</span>
+    </AppLink>
+  );
+}
+
+/** «Решения» чата: щелчок — к карточке в ленте. */
+function Decisions({ chat, decisions, now, onJump }: { chat: ChatDetail; decisions: Decision[]; now: number; onJump: () => void }) {
+  const sorted = [...decisions].sort(byAttention);
+  const titles = new Map(decisions.map((d) => [d.id, d.title] as const));
+  const opts = { titleOf: (id: string) => titles.get(id) ?? null, when: (iso: string) => whenShort(iso, now) };
+  return (
+    <Plate className="flex flex-col gap-3 px-6 pt-[22px] pb-7">
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="m-0 text-section font-semibold tracking-[-0.01em]">{s.info.decisions}</h2>
+        {decisions.length > 0 ? <span className="text-cap text-ink-2">{plural(decisions.length, forms.decisions)}</span> : null}
+      </div>
+      {sorted.length === 0 ? <p className="m-0 text-cap leading-[1.45] text-ink-2">{s.info.noDecisions}</p> : null}
+      {sorted.length > 0 ? (
+        <ul className="-mx-3 m-0 flex list-none flex-col p-0">
+          {sorted.map((d) => (
+            <li key={d.id}>
+              <DecisionRow
+                d={d}
+                to={chatRoute(chat.repo, chat.chat_id)}
+                hash={d.id}
+                meta={(d.from_chat ? `${s.decision.fromFork} · ` : "") + statusLabel(d, opts)}
+                onClick={onJump}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </Plate>
+  );
+}
+
+/** «Предложения родителю» — только у Fork. */
+function Proposals({
+  chat,
+  outgoing,
+  parentTitle,
+  now,
+  onPropose,
+}: {
+  chat: ChatDetail;
+  outgoing: Decision[];
+  parentTitle: string | null;
+  now: number;
+  onPropose: (() => void) | null;
+}) {
+  const parent = chat.parent!;
+  const titles = new Map(outgoing.map((d) => [d.id, d.title] as const));
+  const opts = { titleOf: (id: string) => titles.get(id) ?? null, when: (iso: string) => whenShort(iso, now) };
+  const sorted = [...outgoing].sort(byAttention);
+  return (
+    <Plate className="flex flex-col gap-3 px-6 pt-[22px] pb-7">
+      <h2 className="m-0 text-section font-semibold tracking-[-0.01em]">{s.info.proposals}</h2>
+      {sorted.length === 0 ? <p className="m-0 text-cap leading-[1.45] text-ink-2">{s.info.noProposals}</p> : null}
+      {sorted.length > 0 ? (
+        <ul className="-mx-3 m-0 flex list-none flex-col p-0">
+          {sorted.map((d) => (
+            <li key={d.id}>
+              <DecisionRow
+                d={d}
+                to={chatRoute(chat.repo, parent.chat_id)}
+                hash={d.id}
+                meta={`${d.status === "proposed" ? s.decision.outgoingWaiting : statusLabel(d, opts)} · ${s.info.proposalTo(parentTitle ?? parent.chat_id)}`}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {onPropose ? (
+        <Key onClick={onPropose} className="self-start">
+          {s.info.propose}
+        </Key>
+      ) : null}
     </Plate>
   );
 }

@@ -53,6 +53,27 @@ Fork — новый чат, ответвлённый от сообщения р�
 - **Агенты** в дочернем чате видят историю родителя файлами
   `chats/<parent_id>/messages/` в своей ветке, а пишут в `chats/<child_id>/messages/`.
 
+## Решения (Этап 5)
+
+Решение — цепочка событий-файлов `chats/<chat_id>/decisions/<stamp>-<author>-<rand>.md`
+(тот же формат имени, что у сообщений). Статус не хранится, а вычисляется
+сворачиванием событий по времени (`foldDecisions`); история решения — история Git.
+
+Frontmatter события: `id`, `decision` (у `propose` равен `id`), `action`
+(`propose | accept | reject | reopen | discuss`), `author`, `created_at`, а у
+`propose` ещё `title`, `source_messages` (id через запятую), `from_chat`
+(Fork, из которого пришло предложение), `supersedes` (id заменяемого решения).
+Тело — обоснование.
+
+Статусы: `proposed → under_discussion → accepted | rejected`, `reopen` → `reopened`.
+Принятие решения с `supersedes` переводит старое в `superseded` — оно не удаляется.
+`accept`, `reject`, `reopen` от агента остаются в истории с пометкой, но статус
+не меняют: последнее слово за человеком (п. 2.3 спеки).
+
+**Предложить родителю** (п. 4.7): из Fork событие `propose` пишется в ветку и
+папку решений **родителя** с `from_chat = <fork_id>`. В родителе это карточка
+«Предложение из Fork» с действиями «Открыть Fork / Принять / Отклонить / Обсудить».
+
 ## Сообщение-файл
 
 Путь: `chats/<chat_id>/messages/<stamp>-<author>-<rand>.md`

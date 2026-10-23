@@ -98,6 +98,25 @@ describe("события вебхука → SSE", () => {
     expect(ev("push", { ref: "refs/heads/main" })).toEqual([repoUpdated]);
   });
 
+  test("push «предложение из Fork» в ветку родителя: родитель, сам Fork (его outgoing) и дерево", () => {
+    const head = (message: string) => ({ ref: "refs/heads/chat/20261023-k7q2", head_commit: { message } });
+    expect(ev("push", head("chat(20261023-k7q2): предложение из Fork 20261024-m2p9"))).toEqual([
+      chat("20261023-k7q2", null),
+      chat("20261024-m2p9", null),
+      repoUpdated,
+    ]);
+    // Обычное сообщение, решение, кривой id или вовсе нет head_commit (удаление ветки) — как раньше.
+    for (const payload of [
+      head("chat(20261023-k7q2): alex011082"),
+      head("chat(20261023-k7q2): решение alex011082"),
+      head("chat(20261023-k7q2): предложение из Fork ../../x"),
+      head("chat(20261023-k7q2): предложение из Fork 20261023-k7q2"),
+      { ref: "refs/heads/chat/20261023-k7q2", head_commit: null },
+    ]) {
+      expect(ev("push", payload)).toEqual([chat("20261023-k7q2", null), repoUpdated]);
+    }
+  });
+
   test("pull_request: ветка чата в head или base", () => {
     expect(ev("pull_request", { pull_request: { number: 5, head: { ref: "chat/20261023-k7q2" }, base: { ref: "main" } } })).toEqual([chat("20261023-k7q2", 5)]);
     expect(ev("pull_request", { pull_request: { number: 9, head: { ref: "claude/reply" }, base: { ref: "chat/20261023-k7q2" } } })).toEqual([chat("20261023-k7q2", 9)]);

@@ -10,6 +10,7 @@ import { forms, s } from "../strings.ts";
 import { AppLink } from "../ui/AppLink.tsx";
 import { Body, cx, Grille, Key, KeyLink, Lamp, Readout, RoundKey, Screen, type LampState } from "../ui/kit.tsx";
 import { Composer } from "./Composer.tsx";
+import type { DecisionHandler } from "./DecisionCard.tsx";
 import { Timeline } from "./Timeline.tsx";
 
 export interface SyncState {
@@ -49,6 +50,10 @@ interface ChatViewProps {
   /** Название родителя для дочернего чата (из контекста или списка). */
   parentTitle: string | null;
   onFork: (m: MessageItem) => void;
+  onDecide: (m: MessageItem) => void;
+  onDecision: DecisionHandler;
+  /** «Предложить родителю» — только у Fork. */
+  onPropose: (() => void) | null;
 }
 
 export function ChatView(p: ChatViewProps) {
@@ -73,6 +78,10 @@ export function ChatView(p: ChatViewProps) {
       inherited={p.data.inherited}
       parentTitle={p.parentTitle}
       onFork={p.onFork}
+      decisions={p.data.decisions ?? []}
+      outgoing={p.data.outgoing ?? []}
+      onDecide={p.onDecide}
+      onDecision={p.onDecision}
     />
   );
   const composer = (
@@ -131,8 +140,8 @@ export function ChatView(p: ChatViewProps) {
               {chat.title}
             </h1>
           </div>
-          <div className="flex items-center gap-[18px]">
-            <Grille width={86} height={36} className="hidden desk:block" />
+          <div className="flex flex-wrap items-center justify-end gap-x-[18px] gap-y-2.5">
+            <Grille width={86} height={36} className={cx("hidden", p.onPropose ? "min-[1440px]:block" : "desk:block")} />
             <Key
               onClick={() => forkFrom && p.onFork(forkFrom)}
               disabled={!forkFrom}
@@ -140,6 +149,11 @@ export function ChatView(p: ChatViewProps) {
             >
               {s.header.fork}
             </Key>
+            {p.onPropose ? (
+              <Key onClick={p.onPropose} title={s.header.proposeHint}>
+                {s.header.propose}
+              </Key>
+            ) : null}
             <KeyLink href={chat.url} target="_blank" rel="noopener noreferrer">
               {s.header.openInGitHub}
             </KeyLink>

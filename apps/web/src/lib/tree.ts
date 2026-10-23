@@ -1,10 +1,12 @@
-import { parseMessageId, type GraphChat } from "@chat0110/chat-protocol";
+import { parseMessageId, type DecisionStatus, type GraphChat, type GraphDecision } from "@chat0110/chat-protocol";
 import { forkParents } from "./forest.ts";
 
 // Раскладка дерева разговоров (экран «Дерево»). Чистая функция: на входе
 // GET /api/graph, на выходе координаты узлов и рёбер — рисовальщик ничего не
 // считает. Ветка (lane) — вертикаль одного чата; строка (row) — место события
 // в общем порядке времени всех чатов, поэтому ребёнок всегда ниже точки Fork.
+// Решения (Этап 5) — ромбы на ветке своего чата: занимают строку, как сообщения,
+// но не бывают ни началом, ни итогом, ни точкой Fork.
 
 export interface TreeGeometry {
   /** Шаг между осями соседних веток. */
@@ -20,10 +22,13 @@ export interface TreeGeometry {
 
 export const TREE_GEOMETRY: TreeGeometry = { laneW: 152, rowH: 24, padX: 8, padTop: 20, padBottom: 28, bend: 2 };
 
-export type TreeNodeKind = "start" | "fork" | "head" | "dot";
+export type TreeNodeKind = "start" | "fork" | "head" | "dot" | "decision";
 
 export interface TreeNode {
-  /** `<chat_id>/<message_id>` или `<chat_id>/start` для чата без сообщений. */
+  /**
+   * `<chat_id>/<message_id>`, `<chat_id>/start` для чата без сообщений,
+   * `<chat_id>/d:<decision_id>` для решения.
+   */
   key: string;
   chatId: string;
   /** null — узел начала чата, в котором ещё нет сообщений. */
@@ -40,6 +45,8 @@ export interface TreeNode {
   head: boolean;
   /** Дети, ответвлённые от этого узла, — в порядке их веток. */
   forks: string[];
+  /** Решение — у узла-ромба; у остальных null. */
+  decision: GraphDecision | null;
 }
 
 export interface TreeLane {
@@ -53,23 +60,40 @@ export interface TreeLane {
   rootId: string;
   children: string[];
   nodes: string[];
+  /** Ромбы решений этой ветки по времени. */
+  decisions: string[];
+  /** Начало и итог — сообщения (или узел начала), не решения. */
   startKey: string;
   headKey: string;
   startY: number;
   headY: number;
+  /** Верх и низ ствола — с учётом решений вне сообщений. */
+  topY: number;
+  endY: number;
+  topKey: string;
+  endKey: string;
   /** Узел родителя, от которого идёт ребро Fork. */
   forkKey: string | null;
 }
 
 export interface TreeEdge {
   key: string;
-  kind: "lane" | "fork";
-  /** Чат ветки; для ребра Fork — ребёнок. */
+  /**
+   * lane — ствол ветки; fork — провод от точки Fork к началу ребёнка;
+   * proposal — «Предложить родителю»: от ветки Fork к ромбу в родителе;
+   * supersede — новое решение заменило старое на той же ветке.
+   */
+  kind: "lane" | "fork" | "proposal" | "supersede";
+  /** Чат ветки; для ребра Fork и провода предложения — ребёнок (Fork). */
   chatId: string;
   from: string;
   to: string;
   /** Путь SVG. */
   d: string;
+  /** У proposal и supersede — решение, к которому относится ребро. */
+  decisionId?: string;
+  /** У proposal — статус решения: пунктир, пока ждёт; сплошной, когда принято. */
+  status?: DecisionStatus;
 }
 
 export interface TreeLayout {
@@ -92,6 +116,7 @@ interface Event {
   t: number;
   /** Для равного времени: id сообщения (или чата у узла начала). */
   sortId: string;
+  decision: GraphDecision | null;
 }
 
 const ms = (iso: string): number => {
@@ -108,7 +133,7 @@ function messageTime(id: string, iso: string, fallback: number): number {
 
 const before = (a: Event, b: Event) => a.t - b.t || (a.sortId < b.sortId ? -1 : a.sortId > b.sortId ? 1 : 0);
 
-/** Сообщения чата по времени; чат без сообщений — один узел начала. */
+/** Сообщения и решения чата по времени; чат без сообщений — узел начала. */
 function eventsOf(chat: GraphChat): Event[] {
   const created = ms(chat.created_at);
   const base = Number.isFinite(created) ? created : 0;
@@ -125,6 +150,7 @@ function eventsOf(chat: GraphChat): Event[] {
       at: m.created_at,
       t: messageTime(m.id, m.created_at, base),
       sortId: m.id,
+      decision: null,
     });
   }
   if (list.length === 0) {
@@ -136,10 +162,28 @@ function eventsOf(chat: GraphChat): Event[] {
       at: chat.created_at,
       t: base,
       sortId: chat.chat_id,
+      decision: null,
+    });
+  }
+  const seenDecisions = new Set<string>();
+  for (const d of chat.decisions ?? []) {
+    if (seenDecisions.has(d.id)) continue;
+    seenDecisions.add(d.id);
+    list.push({
+      key: `${chat.chat_id}/d:${d.id}`,
+      chatId: chat.chat_id,
+      messageId: null,
+      author: null,
+      at: d.created_at,
+      t: messageTime(d.id, d.created_at, base),
+      sortId: d.id,
+      decision: d,
     });
   }
   return list.sort(before);
 }
+
+const isPost = (e: Event) => e.decision === null;
 
 /**
  * Индекс события родителя, от которого ответвился ребёнок. Если сообщения
@@ -148,16 +192,18 @@ function eventsOf(chat: GraphChat): Event[] {
  * ребёнка. Раньше всех — начало родителя.
  */
 function anchorIndex(parentEvents: readonly Event[], child: GraphChat): number {
+  // Точка Fork — всегда сообщение (или начало), решения пропускаем.
+  const first = parentEvents.findIndex(isPost);
   const id = child.parent?.message_id;
-  if (!id) return 0;
+  if (!id) return first;
   const exact = parentEvents.findIndex((e) => e.messageId === id);
   if (exact >= 0) return exact;
   const fromId = parseMessageId(id);
   const at = fromId ? Date.parse(fromId.date) : ms(child.created_at);
-  if (!Number.isFinite(at)) return 0;
-  let idx = 0;
+  if (!Number.isFinite(at)) return first;
+  let idx = first;
   parentEvents.forEach((e, i) => {
-    if (e.t <= at) idx = i;
+    if (isPost(e) && e.t <= at) idx = i;
   });
   return idx;
 }
@@ -176,6 +222,26 @@ function forkPath(x1: number, y1: number, x2: number, y2: number, geo: TreeGeome
   const ye = y1 + h;
   const curve = `M${r1(x1)} ${r1(y1)}C${r1(x1 + (x2 - x1) * k)} ${r1(y1)} ${r1(x2)} ${r1(ye - h * k)} ${r1(x2)} ${r1(ye)}`;
   return ye < y2 ? `${curve}V${r1(y2)}` : curve;
+}
+
+/**
+ * Провод «Предложить родителю»: от ветки Fork вниз по её оси, затем плавно
+ * влево и в ромб родителя сбоку. На одной строке — просто горизонталь.
+ */
+function proposalPath(x1: number, y1: number, x2: number, y2: number, geo: TreeGeometry): string {
+  if (y1 === y2) return `M${r1(x1)} ${r1(y1)}H${r1(x2)}`;
+  const dir = y2 > y1 ? 1 : -1;
+  const h = Math.min(Math.abs(y2 - y1), geo.bend * geo.rowH) * dir;
+  const k = 0.5523;
+  const ys = y2 - h;
+  const lead = ys !== y1 ? `M${r1(x1)} ${r1(y1)}V${r1(ys)}` : `M${r1(x1)} ${r1(y1)}`;
+  return `${lead}C${r1(x1)} ${r1(ys + h * k)} ${r1(x2 + (x1 - x2) * k)} ${r1(y2)} ${r1(x2)} ${r1(y2)}`;
+}
+
+/** Замена решения: тонкая дуга слева от оси ветки — не сливается со стволом. */
+function supersedePath(x: number, y1: number, y2: number, geo: TreeGeometry): string {
+  const b = geo.laneW * 0.22;
+  return `M${r1(x)} ${r1(y1)}C${r1(x - b)} ${r1(y1)} ${r1(x - b)} ${r1(y2)} ${r1(x)} ${r1(y2)}`;
 }
 
 export function layoutTree(chats: readonly GraphChat[], geo: TreeGeometry = TREE_GEOMETRY): TreeLayout {
@@ -267,11 +333,15 @@ export function layoutTree(chats: readonly GraphChat[], geo: TreeGeometry = TREE
   }
   for (const list of forksAt.values()) list.sort((a, b) => laneInfo.get(a)!.lane - laneInfo.get(b)!.lane);
 
+  // Начало и итог ветки — первое и последнее сообщение (или узел начала).
+  const postsOf = (id: string) => events.get(id)!.filter(isPost);
+  const firstPost = new Map(unique.map((c) => [c.chat_id, postsOf(c.chat_id)[0]!.key] as const));
+  const lastPost = new Map(unique.map((c) => [c.chat_id, postsOf(c.chat_id).at(-1)!.key] as const));
+
   const nodeByKey = new Map<string, TreeNode>();
   const nodes: TreeNode[] = order.map((e) => {
-    const list = events.get(e.chatId)!;
-    const start = list[0]!.key === e.key;
-    const head = list[list.length - 1]!.key === e.key;
+    const start = firstPost.get(e.chatId) === e.key;
+    const head = lastPost.get(e.chatId) === e.key;
     const forks = forksAt.get(e.key) ?? [];
     const lane = laneInfo.get(e.chatId)!.lane;
     const row = rowOf.get(e.key)!;
@@ -285,10 +355,11 @@ export function layoutTree(chats: readonly GraphChat[], geo: TreeGeometry = TREE
       lane,
       x: xOf(lane),
       y: yOf(row),
-      kind: start ? "start" : forks.length ? "fork" : head ? "head" : "dot",
+      kind: e.decision ? "decision" : start ? "start" : forks.length ? "fork" : head ? "head" : "dot",
       start,
       head,
       forks,
+      decision: e.decision,
     };
     nodeByKey.set(e.key, n);
     return n;
@@ -299,8 +370,10 @@ export function layoutTree(chats: readonly GraphChat[], geo: TreeGeometry = TREE
     .map((c) => {
       const info = laneInfo.get(c.chat_id)!;
       const list = events.get(c.chat_id)!;
-      const first = nodeByKey.get(list[0]!.key)!;
-      const last = nodeByKey.get(list[list.length - 1]!.key)!;
+      const first = nodeByKey.get(firstPost.get(c.chat_id)!)!;
+      const last = nodeByKey.get(lastPost.get(c.chat_id)!)!;
+      const top = nodeByKey.get(list[0]!.key)!;
+      const end = nodeByKey.get(list[list.length - 1]!.key)!;
       return {
         chatId: c.chat_id,
         chat: c,
@@ -311,19 +384,24 @@ export function layoutTree(chats: readonly GraphChat[], geo: TreeGeometry = TREE
         rootId: info.rootId,
         children: children.get(c.chat_id) ?? [],
         nodes: list.map((e) => e.key),
+        decisions: list.filter((e) => e.decision).map((e) => e.key),
         startKey: first.key,
         headKey: last.key,
         startY: first.y,
         headY: last.y,
+        topY: top.y,
+        endY: end.y,
         forkKey: forkKeyOf.get(c.chat_id) ?? null,
+        topKey: top.key,
+        endKey: end.key,
       };
     })
     .sort((a, b) => a.lane - b.lane);
 
   const edges: TreeEdge[] = [];
   for (const l of lanes) {
-    if (l.startKey !== l.headKey) {
-      edges.push({ key: `lane:${l.chatId}`, kind: "lane", chatId: l.chatId, from: l.startKey, to: l.headKey, d: `M${l.x} ${l.startY}V${l.headY}` });
+    if (l.topKey !== l.endKey) {
+      edges.push({ key: `lane:${l.chatId}`, kind: "lane", chatId: l.chatId, from: l.topKey, to: l.endKey, d: `M${l.x} ${l.topY}V${l.endY}` });
     }
   }
   for (const l of lanes) {
@@ -331,6 +409,45 @@ export function layoutTree(chats: readonly GraphChat[], geo: TreeGeometry = TREE
     const from = nodeByKey.get(l.forkKey)!;
     const to = nodeByKey.get(l.startKey)!;
     edges.push({ key: `fork:${l.chatId}`, kind: "fork", chatId: l.chatId, from: from.key, to: to.key, d: forkPath(from.x, from.y, to.x, to.y, geo) });
+  }
+
+  // Провода предложений: из ветки Fork на строке предложения, а если ветка
+  // к тому времени кончилась — от её конца.
+  const laneOf = new Map(lanes.map((l) => [l.chatId, l] as const));
+  for (const l of lanes) {
+    for (const key of l.decisions) {
+      const to = nodeByKey.get(key)!;
+      const from = to.decision!.from_chat ? laneOf.get(to.decision!.from_chat) : undefined;
+      if (!from || from.chatId === l.chatId) continue;
+      const y = Math.min(Math.max(to.y, from.topY), from.endY);
+      const near = [...from.nodes].reverse().map((k) => nodeByKey.get(k)!).find((n) => n.y <= y) ?? nodeByKey.get(from.topKey)!;
+      edges.push({
+        key: `proposal:${to.decision!.id}`,
+        kind: "proposal",
+        chatId: from.chatId,
+        from: near.key,
+        to: to.key,
+        d: proposalPath(from.x, y, to.x, to.y, geo),
+        decisionId: to.decision!.id,
+        status: to.decision!.status,
+      });
+    }
+  }
+  for (const l of lanes) {
+    for (const key of l.decisions) {
+      const a = nodeByKey.get(key)!;
+      const old = a.decision!.supersedes ? nodeByKey.get(`${l.chatId}/d:${a.decision!.supersedes}`) : undefined;
+      if (!old) continue;
+      edges.push({
+        key: `supersede:${a.decision!.id}`,
+        kind: "supersede",
+        chatId: l.chatId,
+        from: a.key,
+        to: old.key,
+        d: supersedePath(a.x, a.y, old.y, geo),
+        decisionId: a.decision!.id,
+      });
+    }
   }
 
   return {

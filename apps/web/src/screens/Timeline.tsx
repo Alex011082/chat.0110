@@ -3,19 +3,21 @@ import {
   resolveAuthor,
   type AgentPrItem,
   type ChatDetail,
+  type Decision,
   type ForkRef,
   type InheritedContext,
   type MessageItem,
   type ReviewItem,
   type TimelineItem,
 } from "@chat0110/chat-protocol";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { errorText } from "../api.ts";
 import { prefersReducedMotion, useCopy } from "../hooks.ts";
+import { decisionEventText, quietDecisionEvents } from "../lib/decision.ts";
 import { canForkFrom, groupForks, messageRef } from "../lib/fork.ts";
 import { chatRoute } from "../lib/route.ts";
 import { clock, dateTimeShort, groupByDay } from "../lib/time.ts";
-import { initials, plural, sha7 } from "../lib/text.ts";
+import { excerpt, initials, plural, sha7 } from "../lib/text.ts";
 import {
   blockKey,
   blockTime,
@@ -30,6 +32,7 @@ import { forms, s } from "../strings.ts";
 import { AppLink } from "../ui/AppLink.tsx";
 import { cx, Key, Lamp, Screen, TextButton, TextLink } from "../ui/kit.tsx";
 import { Markdown } from "../ui/Markdown.tsx";
+import { DecisionCard, OutgoingProposals, type DecisionHandler } from "./DecisionCard.tsx";
 
 export interface TimelineProps {
   chat: ChatDetail;
@@ -48,6 +51,13 @@ export interface TimelineProps {
   inherited: InheritedContext | null;
   parentTitle: string | null;
   onFork: (m: MessageItem) => void;
+  /** Все решения чата — названия для «Заменяет» и «заменено → …». */
+  decisions: Decision[];
+  /** Предложения этого Fork родителю. */
+  outgoing: Decision[];
+  /** «Решение» у сообщения — форма нового решения. */
+  onDecide: (m: MessageItem) => void;
+  onDecision: DecisionHandler;
 }
 
 export function Timeline(p: TimelineProps) {
@@ -57,7 +67,12 @@ export function Timeline(p: TimelineProps) {
   const [flashId, setFlashId] = useState<string | null>(null);
   const [flashDone, setFlashDone] = useState(false);
 
-  const view = useMemo(() => mergeTimeline(p.items, p.local), [p.items, p.local]);
+  // «Сразу принять» пишет и предложение, и принятие — строку «принял» не повторяем.
+  const shown = useMemo(() => {
+    const quiet = quietDecisionEvents(p.items);
+    return quiet.size ? p.items.filter((i) => !quiet.has(i.id)) : p.items;
+  }, [p.items]);
+  const view = useMemo(() => mergeTimeline(shown, p.local), [shown, p.local]);
   const blocks = useMemo(() => layoutTimeline(view), [view]);
   const known = useMemo(
     () => [...p.items, ...p.local.flatMap((e) => (e.item ? [e.item] : []))],
@@ -75,7 +90,9 @@ export function Timeline(p: TimelineProps) {
     if (!el || !scroller.current?.contains(el)) return false;
     // Человек пришёл читать конкретное место — не утаскиваем его вниз при обновлении.
     nearBottom.current = false;
-    el.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    // Высокая карточка (решение с доводами) по центру ушла бы заголовком за край.
+    const tall = el.offsetHeight > scroller.current.clientHeight * 0.7;
+    el.scrollIntoView({ block: tall ? "start" : "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
     setFlashId(id);
     setFlashDone(false);
     return true;
@@ -91,10 +108,14 @@ export function Timeline(p: TimelineProps) {
     };
   }, [flashId]);
 
+  // Цель ссылки, которой ещё нет в ленте (новое решение до перечитывания) —
+  // подсветим, как только она появится.
+  const pendingHash = useRef<string | null>(null);
+
   useEffect(() => {
     const onHash = () => {
       const id = decodeURIComponent(location.hash.slice(1));
-      if (id) flashTo(id);
+      if (id) pendingHash.current = flashTo(id) ? null : id;
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
@@ -110,6 +131,10 @@ export function Timeline(p: TimelineProps) {
       const id = decodeURIComponent(location.hash.slice(1));
       if (id && flashTo(id)) return;
       el.scrollTop = el.scrollHeight;
+      return;
+    }
+    if (pendingHash.current && flashTo(pendingHash.current)) {
+      pendingHash.current = null;
       return;
     }
     if (nearBottom.current) el.scrollTop = el.scrollHeight;
@@ -133,7 +158,15 @@ export function Timeline(p: TimelineProps) {
     if (el) nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 140;
   };
 
-  const ctx: EntryCtx = { ...p, known, flashId, flashDone, forksAt: forks.byMessage };
+  const titles = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const d of [...p.decisions, ...p.outgoing]) m.set(d.id, d.title);
+    for (const i of p.items) if (i.kind === "decision") m.set(i.id, i.decision.title);
+    return m;
+  }, [p.decisions, p.outgoing, p.items]);
+  const titleOf = useCallback((id: string) => titles.get(id) ?? null, [titles]);
+
+  const ctx: EntryCtx = { ...p, known, flashId, flashDone, forksAt: forks.byMessage, titleOf };
 
   // Раскрытый контекст родителя растит ленту сверху — не утаскиваем человека вниз.
   const onContext = () => {
@@ -154,6 +187,7 @@ export function Timeline(p: TimelineProps) {
         {p.chat.parent ? (
           <ForkOrigin chat={p.chat} inherited={p.inherited} parentTitle={p.parentTitle} now={p.now} onToggle={onContext} />
         ) : null}
+        <OutgoingProposals outgoing={p.outgoing} chat={p.chat} now={p.now} />
         {groups.length === 0 ? <p className="m-0 py-6 text-copy text-ink-2">{s.timeline.emptyChat}</p> : null}
         {groups.map((g) => (
           <div key={g.key} role="group" aria-label={g.label}>
@@ -308,6 +342,7 @@ interface EntryCtx extends TimelineProps {
   flashId: string | null;
   flashDone: boolean;
   forksAt: Map<string, ForkRef[]>;
+  titleOf: (id: string) => string | null;
 }
 
 function Entry({ block, first, ctx }: { block: Block; first: boolean; ctx: EntryCtx }) {
@@ -339,6 +374,28 @@ function Entry({ block, first, ctx }: { block: Block; first: boolean; ctx: Entry
       return (
         <SystemLine first={first} at={item.created_at}>
           {s.timeline.pushed(item.display, item.title, plural(item.files, forms.files))}
+        </SystemLine>
+      );
+    case "decision":
+      return (
+        <DecisionCard
+          d={item.decision}
+          chat={ctx.chat}
+          known={ctx.known}
+          forks={ctx.forks}
+          titleOf={ctx.titleOf}
+          now={ctx.now}
+          flash={ctx.flashId === item.id}
+          flashDone={ctx.flashDone}
+          onAction={ctx.onDecision}
+        />
+      );
+    case "decision_event":
+      return (
+        <SystemLine first={first} at={item.created_at} note={item.text ? excerpt(item.text, 220) : null}>
+          <a href={`#${item.decision_id}`} className="no-underline">
+            {decisionEventText(item)}
+          </a>
         </SystemLine>
       );
     case "agent_pr":
@@ -416,6 +473,9 @@ function Message({ m, first, published, ctx }: { m: MessageItem; first: boolean;
             {copied ? s.copied : s.timeline.link}
           </TextButton>
           {canForkFrom(m) ? <TextButton onClick={() => ctx.onFork(m)}>{s.timeline.fork}</TextButton> : null}
+          {!m.pending && ctx.chat.can_push ? (
+            <TextButton onClick={() => ctx.onDecide(m)}>{s.timeline.decide}</TextButton>
+          ) : null}
         </div>
         {forks ? <ForkChips forks={forks} repo={ctx.chat.repo} label={s.timeline.forksLabel} /> : null}
       </div>
@@ -459,18 +519,16 @@ function LocalMessage({ entry, first, ctx }: { entry: LocalEntry; first: boolean
 
 // --- Системные строки, ревью, PR агента ------------------------------------------
 
-function SystemLine({ first, at, children }: { first: boolean; at: string; children: ReactNode }) {
+function SystemLine({ first, at, note, children }: { first: boolean; at: string; note?: string | null; children: ReactNode }) {
   return (
-    <div
-      className={cx(
-        "flex items-center gap-2.5 text-cap text-ink-2",
-        first ? "pt-2 pb-3.5" : "border-t border-line py-3",
-      )}
-    >
-      <Lamp state="off" size={6} ring={false} />
-      <span>
-        {children} · {clock(at)}
-      </span>
+    <div className={cx("flex flex-col gap-1 text-cap text-ink-2", first ? "pt-2 pb-3.5" : "border-t border-line py-3")}>
+      <div className="flex items-center gap-2.5">
+        <Lamp state="off" size={6} ring={false} />
+        <span>
+          {children} · {clock(at)}
+        </span>
+      </div>
+      {note ? <p className="m-0 pl-4 leading-[1.45] text-ink [overflow-wrap:anywhere]">«{note}»</p> : null}
     </div>
   );
 }

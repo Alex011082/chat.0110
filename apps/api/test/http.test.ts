@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { serializeDecisionFile } from "@chat0110/chat-protocol";
 import { createHmac } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -138,10 +139,11 @@ describe("маршруты", () => {
           head: { ref: "chat/20261023-k7q2", sha: "h", repo: { full_name: "Alex011082/chat.0110" } }, base: { ref: "main" },
         }],
       })
-      .on("GET", `${R}/contents/chats/20261023-k7q2/messages`, { body: [] });
+      .on("GET", `${R}/contents/chats/20261023-k7q2/messages`, { body: [] })
+      .on("GET", `${R}/contents/chats/20261023-k7q2/decisions`, { status: 404, body: { message: "Not Found" } });
     const res = await app(get("/api/graph?repo=Alex011082/chat.0110", cookie));
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ repo: "Alex011082/chat.0110", chats: [{ chat_id: "20261023-k7q2", parent: null, messages: [] }] });
+    expect(await res.json()).toMatchObject({ repo: "Alex011082/chat.0110", chats: [{ chat_id: "20261023-k7q2", parent: null, messages: [], decisions: [] }] });
   });
 
   test("POST …/fork: проверка тела до GitHub; неизвестное сообщение — 404", async () => {
@@ -154,6 +156,77 @@ describe("маршруты", () => {
     const res = await app(post(path, { message_id: "c1", title: "Тема" }, { cookie }));
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ code: "not_found" });
+  });
+
+  test("решения: новые маршруты без сессии — 401, кривые id и действие — 400 до GitHub", async () => {
+    const { app, cookie, fake } = await setup();
+    const base = "/api/chats/Alex011082/chat.0110/20261023-k7q2";
+    const D = "20261023T090000Z-alex011082-d001";
+    for (const path of [`${base}/decisions`, `${base}/decisions/${D}/accept`, `${base}/propose`]) {
+      expect((await app(post(path, { title: "x", source_messages: [] }))).status).toBe(401);
+    }
+    for (const path of [`${base}/decisions/..%2Fx/accept`, `${base}/decisions/${D}/delete`, `${base}/decisions/c1/accept`]) {
+      expect((await app(post(path, {}, { cookie }))).status).toBe(400);
+    }
+    expect(fake.calls.length).toBe(0);
+  });
+
+  test("POST …/decisions — 201 DecisionResponse; POST …/decisions/:id/accept — 200", async () => {
+    const { app, cookie, fake } = await setup();
+    const B = "chat/20261023-k7q2";
+    const DDIR = "chats/20261023-k7q2/decisions";
+    const D = "20261023T100203Z-alex011082-m3p8";
+    fake
+      .on("GET", `${R}/git/ref/heads/${B}`, { body: { object: { sha: "h" } } })
+      .on("GET", `${R}/git/commits/h`, { body: { tree: { sha: "t" } } })
+      .on("POST", `${R}/git/trees`, { status: 201, body: { sha: "t2" } })
+      .on("POST", `${R}/git/commits`, { status: 201, body: { sha: "c2" } })
+      .on("PATCH", `${R}/git/refs/heads/${B}`, { body: {} });
+    const res = await app(post("/api/chats/Alex011082/chat.0110/20261023-k7q2/decisions", { title: "Мост", text: "Быстрее.", source_messages: [] }, { cookie }));
+    expect(res.status).toBe(201);
+    expect((await res.json()).decision).toMatchObject({ id: D, title: "Мост", status: "proposed" });
+
+    const content = serializeDecisionFile({
+      id: D, decision: D, action: "propose", author: "alex011082", created_at: "2026-10-23T10:02:03Z", title: "Мост", source_messages: [], text: "",
+    });
+    fake
+      .on("GET", `${R}/contents/${DDIR}`, { body: [{ type: "file", name: `${D}.md`, path: `${DDIR}/${D}.md`, sha: "sd" }] })
+      .on("GET", `${R}/git/blobs/sd`, { body: { content: Buffer.from(content).toString("base64"), encoding: "base64" } })
+      .on("PUT", /\/contents\/chats\/20261023-k7q2\/decisions\//, { status: 201, body: { commit: { sha: "e", html_url: "u" } } });
+    const acc = await app(post(`/api/chats/Alex011082/chat.0110/20261023-k7q2/decisions/${D}/accept`, { text: "Да." }, { cookie }));
+    expect(acc.status).toBe(200);
+    expect((await acc.json()).decision).toMatchObject({ id: D, status: "accepted", decided_by: "alex011082" });
+    // В ветке (фейке) решение всё ещё только предложено — открывать нечего.
+    const again = await app(post(`/api/chats/Alex011082/chat.0110/20261023-k7q2/decisions/${D}/reopen`, {}, { cookie }));
+    expect(again.status).toBe(409);
+    expect(await again.json()).toEqual({ error: "Решение и так открыто", code: "conflict" });
+  });
+
+  test("POST …/propose — 201; не Fork — 400 по-русски", async () => {
+    const { app, cookie, fake } = await setup();
+    const CHILD = "20261023-m2p9";
+    const parent = { chat_id: "20261023-k7q2", message_id: "c101", commit_sha: "2".repeat(40) };
+    fake
+      .on("GET", `${R}/contents/chats/${CHILD}/chat.json`, {
+        body: { content: Buffer.from(JSON.stringify({ schema_version: 1, chat_id: CHILD, title: "Т", created_at: "2026-10-23T11:00:00Z", created_by: "bob", parent })).toString("base64") },
+      })
+      .on("PUT", /\/contents\/chats\/20261023-k7q2\/decisions\//, { status: 201, body: { commit: { sha: "p", html_url: "u" } } });
+    const res = await app(post(`/api/chats/Alex011082/chat.0110/${CHILD}/propose`, { title: "Мост", text: "Да.", source_messages: [] }, { cookie }));
+    expect(res.status).toBe(201);
+    expect((await res.json()).decision).toMatchObject({ title: "Мост", status: "proposed", from_chat: CHILD });
+
+    fake
+      .on("GET", `${R}/contents/chats/${CHILD}/chat.json`, { status: 404, body: { message: "Not Found" } })
+      .on("GET", /\/pulls\?state=all&head=/, {
+        body: [{
+          number: 7, title: "Т", body: `<!-- chat0110\nchat_id: ${CHILD}\n-->`, state: "open", draft: true, html_url: "u",
+          created_at: "2026-10-23T11:00:00Z", updated_at: "2026-10-23T11:00:00Z", user: { login: "bob" },
+          head: { ref: `chat/${CHILD}`, sha: "h", repo: { full_name: "Alex011082/chat.0110" } }, base: { ref: "main" },
+        }],
+      });
+    const plain = await app(post(`/api/chats/Alex011082/chat.0110/${CHILD}/propose`, { title: "Мост", text: "", source_messages: [] }, { cookie }));
+    expect(plain.status).toBe(400);
+    expect(await plain.json()).toEqual({ error: "Это не Fork — предлагать некому", code: "bad_request" });
   });
 
   test("лимит GitHub — 429 с Retry-After", async () => {
