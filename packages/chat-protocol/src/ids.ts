@@ -74,7 +74,25 @@ export function chatJsonPath(chatId: string): string {
 }
 
 export function isMessagePath(chatId: string, path: string): boolean {
-  const prefix = `${messagesDir(chatId)}/`;
+  return isEventPath(messagesDir(chatId), path);
+}
+
+// События решений живут рядом с сообщениями, в тех же именах файлов:
+// одно событие — один файл, поэтому параллельные пуши не конфликтуют.
+export function decisionsDir(chatId: string): string {
+  return `chats/${chatId}/decisions`;
+}
+
+export function decisionPath(chatId: string, eventId: string): string {
+  return `${decisionsDir(chatId)}/${eventId}.md`;
+}
+
+export function isDecisionPath(chatId: string, path: string): boolean {
+  return isEventPath(decisionsDir(chatId), path);
+}
+
+function isEventPath(dir: string, path: string): boolean {
+  const prefix = `${dir}/`;
   if (!path.startsWith(prefix) || !path.endsWith(".md")) return false;
   return parseMessageId(path.slice(prefix.length, -3)) !== null;
 }

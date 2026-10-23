@@ -1,5 +1,6 @@
 // Контракт HTTP API между apps/api и apps/web. Только типы: обе стороны
 // импортируют их отсюда, чтобы расхождение ловил typecheck, а не пользователь.
+import type { Decision, DecisionStatus } from "./decision.ts";
 import type { ChatMeta, ForkPoint } from "./meta.ts";
 import type { MessageItem, TimelineItem } from "./timeline.ts";
 
@@ -84,6 +85,10 @@ export interface TimelineResponse {
   items: TimelineItem[];
   forks: ForkRef[];
   inherited: InheritedContext | null;
+  // Все решения этого чата с текущими статусами (из chats/<id>/decisions/).
+  decisions: Decision[];
+  // Предложения, которые этот Fork отправил родителю, с их статусами в родителе.
+  outgoing: Decision[];
 }
 
 // POST /api/chats/:owner/:repo/:chatId/fork → CreateChatResponse
@@ -102,8 +107,19 @@ export interface GraphMessage {
   created_at: string;
 }
 
+export interface GraphDecision {
+  id: string;
+  title: string;
+  status: DecisionStatus;
+  created_at: string;
+  decided_at?: string;
+  from_chat?: string;
+  supersedes?: string;
+}
+
 export interface GraphChat extends ChatSummary {
   messages: GraphMessage[];
+  decisions: GraphDecision[];
 }
 
 export interface GraphResponse {
@@ -159,3 +175,31 @@ export interface ChatUpdatedEvent {
 }
 export const SSE_CHAT_UPDATED = "chat.updated";
 export const SSE_REPO_UPDATED = "repo.updated";
+
+// POST /api/chats/:owner/:repo/:chatId/decisions → DecisionResponse.
+// accept: true — человек сразу фиксирует принятое решение (два события одним коммитом).
+export interface CreateDecisionRequest {
+  title: string;
+  text?: string;
+  source_messages: string[];
+  supersedes?: string;
+  accept?: boolean;
+}
+
+// POST /api/chats/:owner/:repo/:chatId/decisions/:decisionId/(accept|reject|reopen|discuss)
+export interface DecisionActionRequest {
+  text?: string;
+}
+
+// POST /api/chats/:owner/:repo/:forkChatId/propose — предложение пишется в ветку
+// РОДИТЕЛЯ с from_chat = этот Fork (п. 4.7 спеки «Propose to Parent»).
+export interface ProposeToParentRequest {
+  title: string;
+  text: string;
+  source_messages: string[];
+  supersedes?: string;
+}
+
+export interface DecisionResponse {
+  decision: Decision;
+}

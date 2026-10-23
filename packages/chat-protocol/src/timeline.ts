@@ -1,5 +1,6 @@
 import { displayName, isAgent, resolveAuthor } from "./agents.ts";
-import { chatJsonPath, isMessagePath } from "./ids.ts";
+import { foldDecisions, parseDecisionFile, type Decision, type DecisionAction, type DecisionEvent } from "./decision.ts";
+import { chatJsonPath, isDecisionPath, isMessagePath } from "./ids.ts";
 import { parseMessageFile, validIso, type MessageFile } from "./message-file.ts";
 import { parseCommentMeta } from "./meta.ts";
 
@@ -61,6 +62,8 @@ export interface TimelineInput {
   reviews: ReviewInput[];
   reviewComments: ReviewCommentInput[];
   agentPrs: AgentPrInput[];
+  // Файлы chats/<chat_id>/decisions/ на голове ветки (Этап 5).
+  decisions?: FileInput[];
 }
 
 export interface MessageItem {
@@ -123,7 +126,32 @@ export interface AgentPrItem {
   url: string;
   message_ids: string[];
 }
-export type TimelineItem = MessageItem | CreatedItem | PushItem | ReviewItem | AgentPrItem;
+// Решение показывается одной карточкой в момент предложения с текущим
+// статусом; последующие события — короткими строками в своё время.
+export interface DecisionItem {
+  kind: "decision";
+  id: string;
+  author: string;
+  display: string;
+  decision: Decision;
+  created_at: string;
+  actor?: string;
+  commit_sha?: string;
+  url?: string;
+}
+export interface DecisionEventItem {
+  kind: "decision_event";
+  id: string;
+  decision_id: string;
+  action: DecisionAction;
+  title: string;
+  author: string;
+  display: string;
+  text: string;
+  ignored?: boolean;
+  created_at: string;
+}
+export type TimelineItem = MessageItem | CreatedItem | PushItem | ReviewItem | AgentPrItem | DecisionItem | DecisionEventItem;
 
 const iso = (value: string) => validIso(value) ?? value;
 
@@ -176,7 +204,7 @@ export function buildTimeline(input: TimelineInput): TimelineItem[] {
     const actor = actorOf(c);
     if (c.added.includes(chatJsonPath(chatId))) {
       items.push({ kind: "created", id: c.sha, actor, created_at: iso(c.date), url: c.url });
-    } else if (!c.added.some((p) => isMessagePath(chatId, p))) {
+    } else if (!c.added.some((p) => isMessagePath(chatId, p) || isDecisionPath(chatId, p))) {
       const author = commitAuthor(c, chatId);
       items.push({
         kind: "push",
@@ -249,6 +277,34 @@ export function buildTimeline(input: TimelineInput): TimelineItem[] {
     if (meta.reply_to) item.reply_to = meta.reply_to;
     items.push(item);
     messageIds.add(id);
+  }
+
+  if (input.decisions?.length) {
+    const decisionAddedBy = new Map<string, CommitInput>();
+    for (const c of input.commits) {
+      for (const path of c.added) {
+        if (isDecisionPath(chatId, path) && !decisionAddedBy.has(baseName(path))) decisionAddedBy.set(baseName(path), c);
+      }
+    }
+    const events = input.decisions
+      .map((f) => parseDecisionFile(f.name, f.content))
+      .filter((e): e is DecisionEvent => e !== null);
+    for (const d of foldDecisions(events)) {
+      const item: DecisionItem = {
+        kind: "decision", id: d.id, author: d.created_by, display: displayName(d.created_by), decision: d, created_at: d.created_at,
+      };
+      const commit = decisionAddedBy.get(`${d.id}.md`);
+      if (commit) Object.assign(item, { actor: actorOf(commit), commit_sha: commit.sha, url: commit.url });
+      items.push(item);
+      for (const h of d.history.slice(1)) {
+        const ev: DecisionEventItem = {
+          kind: "decision_event", id: h.id, decision_id: d.id, action: h.action, title: d.title,
+          author: h.author, display: displayName(h.author), text: h.text, created_at: h.created_at,
+        };
+        if (h.ignored) ev.ignored = true;
+        items.push(ev);
+      }
+    }
   }
 
   for (const r of input.reviews) {
