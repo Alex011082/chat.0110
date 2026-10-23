@@ -1,18 +1,22 @@
-import type { AppConfig, ChatSummary, GraphResponse, Me, MessageItem, RepoInfo, TimelineResponse } from "@chat0110/chat-protocol";
+import type { AppConfig, ChatSummary, Decision, GraphResponse, Me, MessageItem, RepoInfo, TimelineResponse } from "@chat0110/chat-protocol";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, ApiFailure, errorText } from "../api.ts";
 import { navigate, storageGet, storageSet, useLayout, useNow, useRoute } from "../hooks.ts";
 import { eventMatchesChat, type OpenChatRef } from "../lib/chat.ts";
+import type { DecisionVerb } from "../lib/decision.ts";
 import { routePath, splitRepo } from "../lib/route.ts";
 import type { LocalEntry } from "../lib/timeline.ts";
 import { s } from "../strings.ts";
 import { ActionKey, cx, RoundKey } from "../ui/kit.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
+import { Toast } from "../ui/Toast.tsx";
 import { ChatList } from "./ChatList.tsx";
 import { ChatView, MainPlaceholder } from "./ChatView.tsx";
+import { DecisionDialog, type DecisionTarget } from "./DecisionDialog.tsx";
 import { ForkDialog, type ForkTarget } from "./ForkDialog.tsx";
 import { InfoColumn } from "./InfoColumn.tsx";
 import { NewChatDialog } from "./NewChatDialog.tsx";
+import { ProposeDialog, type ProposeTarget } from "./ProposeDialog.tsx";
 import { Rail } from "./Rail.tsx";
 import { TreeView } from "./TreeView.tsx";
 
@@ -63,6 +67,10 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
   const [focusTick, setFocusTick] = useState(0);
   const [graph, setGraph] = useState<GraphState>(NO_GRAPH);
   const [forkTarget, setForkTarget] = useState<ForkTarget | null>(null);
+  const [decisionTarget, setDecisionTarget] = useState<DecisionTarget | null>(null);
+  const [proposeTarget, setProposeTarget] = useState<ProposeTarget | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const hideToast = useCallback(() => setToast(null), []);
 
   // --- Репозиторий: из адреса, иначе последний выбранный, иначе первый ----------
   const repoFull = useMemo(() => {
@@ -302,6 +310,49 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       message: { id: m.id, display: m.display, created_at: m.created_at, text: m.text },
     });
   };
+  // --- Решения ------------------------------------------------------------------------
+  const decide = (m: MessageItem) => {
+    const data = current.data;
+    if (!data) return;
+    setDecisionTarget({
+      repo: data.chat.repo,
+      chatId: data.chat.chat_id,
+      canPush: data.chat.can_push,
+      message: m,
+      items: data.items,
+      decisions: data.decisions ?? [],
+    });
+  };
+  const onDecided = async (d: Decision) => {
+    setDecisionTarget(null);
+    await loadTimeline();
+    // Лента подсветит новую карточку, когда она появится.
+    navigate({ owner: route.owner, repo: route.repo, chatId: route.chatId }, { replace: true, hash: d.id });
+  };
+  const onDecision = async (d: Decision, verb: DecisionVerb, text?: string) => {
+    if (!repoFull || !route.chatId) return;
+    await api().decisionAction(repoFull, route.chatId, d.id, verb, text ? { text } : undefined);
+    await loadTimeline();
+  };
+  const openPropose = () => {
+    const data = current.data;
+    if (!data?.chat.parent) return;
+    setInfoOpen(false);
+    setProposeTarget({
+      chat: data.chat,
+      items: data.items,
+      decisions: data.decisions ?? [],
+      parentTitle: parentTitle ?? data.chat.parent.chat_id,
+    });
+  };
+  const onProposed = (_d: Decision) => {
+    const to = proposeTarget?.parentTitle ?? "";
+    setProposeTarget(null);
+    setToast(s.decision.propose.sent(to));
+    void loadTimeline();
+    void loadChats();
+  };
+
   const onForked = (c: ChatSummary) => {
     setForkTarget(null);
     void loadChats();
@@ -362,6 +413,9 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
         onAccept={accept}
         parentTitle={parentTitle}
         onFork={forkFromMessage}
+        onDecide={decide}
+        onDecision={onDecision}
+        onPropose={current.data.chat.parent ? openPropose : null}
       />
     );
   } else if (route.chatId && current.error && current.error.code !== "network" && current.error.code !== "rate_limited") {
@@ -405,6 +459,10 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       forks={current.data.forks}
       inherited={current.data.inherited}
       parentTitle={parentTitle}
+      decisions={current.data.decisions ?? []}
+      outgoing={current.data.outgoing ?? []}
+      onJump={() => setInfoOpen(false)}
+      onPropose={current.data.chat.parent ? openPropose : null}
     />
   ) : null;
 
@@ -419,7 +477,14 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
     />
   ) : null;
 
-  const forkDialog = <ForkDialog target={forkTarget} onClose={() => setForkTarget(null)} onCreated={onForked} />;
+  const forkDialog = (
+    <>
+      <ForkDialog target={forkTarget} onClose={() => setForkTarget(null)} onCreated={onForked} />
+      <DecisionDialog target={decisionTarget} now={now} onClose={() => setDecisionTarget(null)} onCreated={(d) => void onDecided(d)} />
+      <ProposeDialog target={proposeTarget} now={now} onClose={() => setProposeTarget(null)} onSent={onProposed} />
+      <Toast text={toast} onClose={hideToast} />
+    </>
+  );
 
   const rail = (bottom: boolean) => (
     <Rail

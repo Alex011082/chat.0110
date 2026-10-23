@@ -11,6 +11,7 @@ export const forms = {
   files: ["файл", "файла", "файлов"],
   chats: ["разговор", "разговора", "разговоров"],
   forks: ["Fork", "Fork", "Fork"],
+  decisions: ["решение", "решения", "решений"],
 } as const satisfies Record<string, Forms>;
 
 export const s = {
@@ -112,6 +113,8 @@ export const s = {
     forkHint: "Fork от последнего сообщения",
     forkNoMessages: "Fork делается от сообщения — в чате их пока нет",
     parent: "Родитель",
+    propose: "Предложить родителю",
+    proposeHint: "Вернуть вывод из Fork в родительский чат как предложение решения",
   },
 
   timeline: {
@@ -168,6 +171,7 @@ export const s = {
     contextLabel: "История родителя до точки Fork",
     contextNote: "История родителя до точки Fork — только чтение. Новые сообщения родителя сюда не попадают.",
     forkPoint: "точка Fork",
+    decide: "Решение",
   },
 
   composer: {
@@ -198,7 +202,7 @@ export const s = {
     inPr: "В PR",
     stored: "Хранится",
     storedValue: "только в GitHub",
-    soon: "Скоро: решения и возврат идеи из Fork в родителя — Этапы 3–5.",
+    soon: "Скоро: вызов агентов по API — Этап 3.",
     closeInfo: "Закрыть панель",
     branches: "Ветвления",
     parent: "Родитель",
@@ -208,6 +212,12 @@ export const s = {
       [who ? `от сообщения ${who}` : "от сообщения", when].filter(Boolean).join(" · "),
     childMeta: (n: number, closed: boolean) => `PR #${n}${closed ? " · закрыт" : ""}`,
     showInTree: "Показать в дереве",
+    decisions: "Решения",
+    noDecisions: "Пока нет. Нажми «Решение» у сообщения — вывод станет отдельным файлом с основаниями.",
+    proposals: "Предложения родителю",
+    noProposals: "Нашли в Fork вариант лучше? Предложи его родителю — там появится карточка решения.",
+    proposalTo: (parent: string) => `в «${parent}»`,
+    propose: "Предложить родителю",
   },
 
   fork: {
@@ -232,10 +242,102 @@ export const s = {
     readOnly: "Fork создать нельзя: у тебя нет права на запись в этот репозиторий. Читать можно.",
   },
 
+  decision: {
+    card: "Решение",
+    fromFork: "Предложение из Fork",
+    status: {
+      proposed: "предложено",
+      under_discussion: "обсуждается",
+      accepted: "принято",
+      rejected: "отклонено",
+      superseded: "заменено",
+      reopened: "открыто заново",
+    },
+    acceptedBy: (who: string, when: string) => `принято · ${who} ${when}`,
+    supersededBy: (title: string) => `заменено → ${title}`,
+    sources: "Основания",
+    sourcesLabel: "Сообщения-основания",
+    sourceChip: (who: string, when: string | null, excerpt: string | null) =>
+      [who, when, excerpt ? `«${excerpt}»` : null].filter(Boolean).join(" · "),
+    sourceUnknown: "сообщение",
+    replaces: "Заменяет:",
+    source: "Источник",
+    origin: "Исходная точка",
+    originValue: (who: string | null, when: string | null, excerpt: string | null) =>
+      [who ?? "сообщение", when, excerpt ? `«${excerpt}»` : null].filter(Boolean).join(" · "),
+    openFork: "Открыть Fork",
+    accept: "Принять",
+    reject: "Отклонить",
+    discuss: "Обсудить",
+    reopen: "Открыть заново",
+    busy: "Записываю…",
+    discussLabel: "Что обсудить",
+    discussPlaceholder: "Сомнение, вопрос или довод — запишется в историю решения",
+    discussSend: "Отправить",
+    event: {
+      accept: (who: string, title: string) => `${who} принял решение «${title}»`,
+      reject: (who: string, title: string) => `${who} отклонил решение «${title}»`,
+      reopen: (who: string, title: string) => `${who} открыл заново решение «${title}»`,
+      discuss: (who: string, title: string) => `${who} вынес на обсуждение решение «${title}»`,
+      propose: (who: string, title: string) => `${who} предложил решение «${title}»`,
+    },
+    // Агент может только предложить: его «принять» статус не меняет (п. 2.3 спеки).
+    ignored: {
+      accept: (who: string, title: string) => `${who} предложил принять «${title}» — решает человек`,
+      reject: (who: string, title: string) => `${who} предложил отклонить «${title}» — решает человек`,
+      reopen: (who: string, title: string) => `${who} предложил открыть заново «${title}» — решает человек`,
+    },
+    outgoing: (status: string) => `Предложено родителю · ${status}`,
+    outgoingWaiting: "ждёт решения",
+    openInParent: "Открыть в родителе",
+    outline: {
+      decisions: "Решения в Fork:",
+      messages: "Главное из Fork:",
+      line: (who: string, text: string) => `- ${who}: ${text}`,
+    },
+    create: {
+      title: "Решение",
+      lead: "Вывод разговора станет файлом в ветке чата. Пересмотреть можно всегда — старое решение не удаляется.",
+      name: "Название",
+      why: "Почему",
+      optional: "— необязательно",
+      whyPlaceholder: "Коротко: что выбрали и чем это лучше",
+      sources: "Основания",
+      sourcesHelp: "Сообщения, на которые опирается решение",
+      supersedes: "Заменяет",
+      none: "— ничего",
+      acceptNow: "Сразу принять",
+      acceptNowHelp: "Иначе решение будет ждать, пока его примет человек.",
+      submitAccept: "Принять решение",
+      submitPropose: "Предложить решение",
+      busy: "Записываю…",
+      readOnly: "Записать решение нельзя: у тебя нет права на запись в этот репозиторий.",
+    },
+    propose: {
+      title: "Предложить родителю",
+      lead: (parent: string) =>
+        `В «${parent}» появится карточка «Предложение из Fork». Решает человек в родителе — история Fork не сливается.`,
+      name: "Предложение",
+      gist: "Суть и аргументы",
+      evidence: "Доказательства",
+      evidenceHelp: "Сообщения Fork — ссылки на них попадут в карточку",
+      supersedes: "Заменяет решение родителя",
+      none: "— ничего",
+      loading: "Загрузка решений родителя…",
+      loadError: "Не удалось загрузить решения родителя — можно отправить и без замены.",
+      submit: "Предложить родителю",
+      busy: "Отправляю…",
+      sent: (parent: string) => `Предложение отправлено в «${parent}»`,
+      readOnly: "Предложить нельзя: у тебя нет права на запись в этот репозиторий.",
+      noMessages: "В Fork пока нет своих сообщений.",
+    },
+  },
+
   tree: {
     label: "Дерево разговоров",
     caption: (owner: string) => `${owner} · дерево разговоров`,
-    summary: (chats: string, forks: string, messages: string) => `${chats} · ${forks} · ${messages}`,
+    summary: (chats: string, forks: string, messages: string, decisions: string | null) =>
+      [chats, forks, messages, decisions].filter(Boolean).join(" · "),
     modes: "Режим просмотра",
     chat: "Чат",
     tree: "Дерево",
@@ -275,8 +377,14 @@ export const s = {
     legendHead: "Итог — горит зелёным, если писали за 15 минут",
     legendDot: "Сообщение",
     legendClosed: "Бледная ветка — чат закрыт",
+    legendAccepted: "Решение принято",
+    legendAwaiting: "Решение ждёт человека",
+    legendRejected: "Решение отклонено или заменено",
+    legendProposal: "Предложение из Fork: пунктир — ждёт, сплошной — принято",
+    decisionTip: (title: string, status: string) => `Решение · ${title} · ${status}`,
+    decisionLabel: (title: string, status: string, chat: string) => `Решение «${title}», ${status}, чат ${chat}`,
     legendHint:
-      "Нажми на точку — откроется чат на этом сообщении. Нажми на заголовок ветки — подробности здесь.",
+      "Нажми на точку или ромб — откроется чат на этом месте. Нажми на заголовок ветки — подробности здесь.",
     close: "Закрыть",
   },
 
@@ -304,5 +412,9 @@ export const s = {
     network: "Нет связи с сервером. Проверь интернет и повтори.",
     generic: "Что-то пошло не так.",
     copyFailed: "Не удалось скопировать",
+  },
+
+  toast: {
+    close: "Скрыть",
   },
 } as const;

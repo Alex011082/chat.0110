@@ -9,15 +9,20 @@ import {
   type ChatUpdatedEvent,
   type CreateChatRequest,
   type CreateChatResponse,
+  type CreateDecisionRequest,
+  type DecisionActionRequest,
+  type DecisionResponse,
   type ForkRequest,
   type GraphResponse,
   type Me,
   type PostMessageRequest,
   type PostMessageResponse,
+  type ProposeToParentRequest,
   type RepoInfo,
   type TimelineResponse,
 } from "@chat0110/chat-protocol";
 import { backoffDelay } from "./lib/chat.ts";
+import type { DecisionVerb } from "./lib/decision.ts";
 import { splitRepo } from "./lib/route.ts";
 import { s } from "./strings.ts";
 
@@ -69,6 +74,18 @@ export interface Api {
   fork(repo: string, chatId: string, req: ForkRequest): Promise<CreateChatResponse>;
   /** Дерево всех чатов репо (до 200 самых свежих). */
   graph(repo: string): Promise<GraphResponse>;
+  /** Новое решение в этом чате; accept — человек сразу его принимает. */
+  createDecision(repo: string, chatId: string, req: CreateDecisionRequest): Promise<DecisionResponse>;
+  /** Принять, отклонить, открыть заново или вынести на обсуждение — событие-файл. */
+  decisionAction(
+    repo: string,
+    chatId: string,
+    decisionId: string,
+    action: DecisionVerb,
+    req?: DecisionActionRequest,
+  ): Promise<DecisionResponse>;
+  /** «Предложить родителю»: предложение ложится в ветку и решения РОДИТЕЛЯ. */
+  proposeToParent(repo: string, forkChatId: string, req: ProposeToParentRequest): Promise<DecisionResponse>;
   logout(): Promise<void>;
   subscribe(repo: string, handlers: LiveHandlers): () => void;
 }
@@ -174,6 +191,14 @@ export const httpApi: Api = {
     request<AcceptAgentPrResponse>("POST", `${chatPath(repo, chatId)}/agent-prs/${n}/accept`, {}),
   fork: (repo, chatId, req) => request<CreateChatResponse>("POST", `${chatPath(repo, chatId)}/fork`, req),
   graph: (repo) => request<GraphResponse>("GET", `/api/graph?repo=${encodeURIComponent(repo)}`),
+  createDecision: (repo, chatId, req) => request<DecisionResponse>("POST", `${chatPath(repo, chatId)}/decisions`, req),
+  decisionAction: (repo, chatId, decisionId, action, req) =>
+    request<DecisionResponse>(
+      "POST",
+      `${chatPath(repo, chatId)}/decisions/${encodeURIComponent(decisionId)}/${action}`,
+      req ?? {},
+    ),
+  proposeToParent: (repo, forkChatId, req) => request<DecisionResponse>("POST", `${chatPath(repo, forkChatId)}/propose`, req),
   logout: async () => {
     await request<unknown>("POST", "/auth/logout", {});
   },

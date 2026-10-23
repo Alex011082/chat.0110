@@ -4,11 +4,14 @@ import { routeHref, type Layout } from "../hooks.ts";
 import { chatRoute, splitRepo } from "../lib/route.ts";
 import { plural } from "../lib/text.ts";
 import { ago, clock, dateTimeShort, dayKey, isFresh } from "../lib/time.ts";
-import { layoutTree, TREE_GEOMETRY, type TreeGeometry, type TreeLane, type TreeLayout, type TreeNode } from "../lib/tree.ts";
+import { awaitsHuman } from "../lib/decision.ts";
+import { excerpt } from "../lib/text.ts";
+import { layoutTree, TREE_GEOMETRY, type TreeEdge, type TreeGeometry, type TreeLane, type TreeLayout, type TreeNode } from "../lib/tree.ts";
 import { forms, s } from "../strings.ts";
 import { followInApp } from "../ui/AppLink.tsx";
 import { ActionKeyLink, Body, cx, Grille, Key, Knob, Lamp, Plate, Readout, Screen } from "../ui/kit.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
+import { DecisionShape } from "./DecisionCard.tsx";
 import type { ForkTarget } from "./ForkDialog.tsx";
 
 // Экран «Дерево»: все чаты репо — вертикальные ветки на плите прибора, Fork —
@@ -41,11 +44,13 @@ export function TreeView(p: TreeViewProps) {
   const selected = (p.select && tree?.lanes.find((l) => l.chatId === p.select)) || null;
   const repo = splitRepo(p.repo ?? "");
 
+  const decisionCount = tree ? tree.lanes.reduce((n, l) => n + l.decisions.length, 0) : 0;
   const summary = tree
     ? s.tree.summary(
         plural(tree.lanes.length, forms.chats),
         plural(tree.lanes.filter((l) => l.parentId).length, forms.forks),
         plural(tree.lanes.reduce((n, l) => n + l.chat.messages.length, 0), forms.messages),
+        decisionCount ? plural(decisionCount, forms.decisions) : null,
       )
     : s.loading;
 
@@ -177,7 +182,28 @@ const shortDay = (iso: string) =>
   new Intl.DateTimeFormat(s.locale, { day: "numeric", month: "short" }).format(new Date(iso)).replace(/\.$/, "");
 
 function nodeRole(n: TreeNode): "start" | "fork" | "head" | null {
-  return n.kind === "dot" ? null : n.kind;
+  return n.kind === "dot" || n.kind === "decision" ? null : n.kind;
+}
+
+const decisionStatus = (n: TreeNode) => (n.decision ? s.decision.status[n.decision.status] : "");
+
+/** Провод предложения из Fork: пунктир оранжевый — ждёт, чёрный — принято, бледный — нет. */
+function ProposalWire({ e }: { e: TreeEdge }) {
+  const st = e.status ?? "proposed";
+  const waiting = awaitsHuman(st);
+  const accepted = st === "accepted";
+  return (
+    <g opacity={waiting || accepted ? undefined : 0.55}>
+      <path d={e.d} className="fill-none stroke-plate" strokeWidth={7} strokeLinecap="round" />
+      <path
+        d={e.d}
+        className={cx("fill-none", waiting ? "stroke-lamp" : accepted ? "stroke-ink" : "stroke-ink-3")}
+        strokeWidth={waiting || accepted ? 2 : 1.5}
+        strokeDasharray={waiting ? "6 4" : undefined}
+        strokeLinecap={waiting ? "butt" : "round"}
+      />
+    </g>
+  );
 }
 
 function TreePlate({
@@ -346,9 +372,9 @@ function TreePlate({
             {selected ? (
               <rect
                 x={selected.x - 9}
-                y={selected.startY - 14}
+                y={selected.topY - 14}
                 width={18}
-                height={selected.headY - selected.startY + 28}
+                height={selected.endY - selected.topY + 28}
                 rx={9}
                 className="fill-screen stroke-line"
                 strokeWidth={1}
@@ -375,6 +401,25 @@ function TreePlate({
                   <path d={e.d} className="fill-none stroke-plate" strokeWidth={7} strokeLinecap="round" />
                   <path d={e.d} className="fill-none stroke-ink" strokeWidth={2} strokeLinecap="round" />
                 </g>
+              ))}
+            {/* Замена решения — тонкая точечная дуга от нового к старому. */}
+            {tree.edges
+              .filter((e) => e.kind === "supersede")
+              .map((e) => (
+                <path
+                  key={e.key}
+                  d={e.d}
+                  className="fill-none stroke-ink-3"
+                  strokeWidth={1.25}
+                  strokeDasharray="0.5 4"
+                  strokeLinecap="round"
+                  opacity={closed(e.chatId) ? 0.55 : undefined}
+                />
+              ))}
+            {tree.edges
+              .filter((e) => e.kind === "proposal")
+              .map((e) => (
+                <ProposalWire key={e.key} e={e} />
               ))}
 
             {tree.lanes.map((l) => (
@@ -414,17 +459,20 @@ function NodeLink({
   onTip: (n: TreeNode | null) => void;
 }) {
   const to = chatRoute(repo, n.chatId);
-  const hash = n.messageId ?? undefined;
+  const hash = n.decision?.id ?? n.messageId ?? undefined;
   const role = nodeRole(n);
   const who = n.author ? displayName(n.author) : s.tree.created;
   const live = lane.chat.state === "open" && isFresh(lane.chat.updated_at, now);
   const show = () => onTip(n);
   const hide = () => onTip(null);
+  const label = n.decision
+    ? s.tree.decisionLabel(n.decision.title, decisionStatus(n), lane.chat.title)
+    : s.tree.nodeLabel(who, when(n.at, now), lane.chat.title, role ? s.tree.role[role] : null);
   return (
     <a
       href={routeHref(to, hash)}
       className="tree-node"
-      aria-label={s.tree.nodeLabel(who, when(n.at, now), lane.chat.title, role ? s.tree.role[role] : null)}
+      aria-label={label}
       onClick={(e) => followInApp(e, to, hash ? { hash } : {})}
       onPointerEnter={show}
       onPointerLeave={hide}
@@ -434,14 +482,18 @@ function NodeLink({
       <g transform={`translate(${n.x} ${n.y})`}>
         <circle r={12} className="fill-transparent" />
         <circle r={n.kind === "start" ? 13 : n.kind === "dot" ? 8 : 11} className="tree-ring fill-none" strokeWidth={2} />
-        <NodeShape kind={n.kind} head={n.head} fork={n.forks.length > 0} live={live && n.head} />
+        {n.kind === "decision" ? (
+          n.decision ? <DecisionShape status={n.decision.status} /> : null
+        ) : (
+          <NodeShape kind={n.kind} head={n.head} fork={n.forks.length > 0} live={live && n.head} />
+        )}
       </g>
     </a>
   );
 }
 
 /** Узел прибора: ручка-начало, чёрный диск Fork, лампа-итог, точка-сообщение. */
-function NodeShape({ kind, head, fork, live }: { kind: TreeNode["kind"]; head: boolean; fork: boolean; live: boolean }) {
+function NodeShape({ kind, head, fork, live }: { kind: Exclude<TreeNode["kind"], "decision">; head: boolean; fork: boolean; live: boolean }) {
   if (kind === "start") {
     return (
       <>
@@ -497,7 +549,7 @@ function Tip({
   const who = n.author ? displayName(n.author) : s.tree.created;
   const forkTitles = n.forks.map((id) => lanes.get(id)?.chat.title).filter(Boolean);
   // У правого края подсказка встаёт слева от узла.
-  const flip = n.x > tree.width - 200;
+  const flip = n.x > tree.width - 260;
   return (
     <div
       role="presentation"
@@ -509,8 +561,9 @@ function Tip({
       }}
     >
       <span className="text-cap font-semibold">
-        {who} · {when(n.at, now)}
+        {n.decision ? s.tree.decisionTip(excerpt(n.decision.title, 48), decisionStatus(n)) : `${who} · ${when(n.at, now)}`}
       </span>
+      {n.decision ? <span className="scale text-ink-2">{when(n.at, now)}</span> : null}
       {role ? (
         <span className="scale text-ink-2">
           {s.tree.roleTip[role]}
@@ -650,6 +703,38 @@ function LanePanel({
         ) : null}
       </dl>
 
+      {lane.decisions.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <span className="scale text-ink-2">{s.tree.decisions}</span>
+          <ul className="-mx-3 m-0 flex list-none flex-col p-0">
+            {lane.decisions
+              .map((k) => tree.nodes.find((n) => n.key === k)?.decision)
+              .filter((d): d is NonNullable<typeof d> => !!d)
+              .reverse()
+              .map((d) => (
+                <li key={d.id}>
+                  <a
+                    href={routeHref(open, d.id)}
+                    onClick={(e) => followInApp(e, open, { hash: d.id })}
+                    className="flex min-w-0 flex-col gap-0.5 rounded-row px-3 pt-2 pb-2.5 text-ink no-underline hover:bg-screen hover:text-ink"
+                  >
+                    <span className="flex items-start gap-2.5">
+                      <svg width={14} height={14} viewBox="-8 -8 16 16" aria-hidden="true" className="mt-[3px] shrink-0 overflow-visible">
+                        <DecisionShape status={d.status} />
+                      </svg>
+                      <span className="min-w-0 text-key leading-snug font-semibold [overflow-wrap:anywhere]">{d.title}</span>
+                    </span>
+                    <span className={cx("pl-6 text-cap", awaitsHuman(d.status) ? "text-action-ink" : "text-ink-2")}>
+                      {s.decision.status[d.status]}
+                      {d.from_chat ? ` · ${s.decision.fromFork}` : ""}
+                    </span>
+                  </a>
+                </li>
+              ))}
+          </ul>
+        </div>
+      ) : null}
+
       {c.parent ? <p className="m-0 text-cap leading-[1.45] text-ink-2">{s.tree.contextNote}</p> : null}
 
       <div className="flex flex-wrap gap-3">
@@ -685,6 +770,13 @@ function Legend() {
         <circle r={4} className="fill-plate stroke-ink-2" strokeWidth={1.5} />
       </g>,
       s.tree.legendClosed,
+    ],
+    [<DecisionShape status="accepted" />, s.tree.legendAccepted],
+    [<DecisionShape status="proposed" />, s.tree.legendAwaiting],
+    [<DecisionShape status="rejected" />, s.tree.legendRejected],
+    [
+      <path d="M12 -9V-2C12 4 6 7 -12 7" className="fill-none stroke-lamp" strokeWidth={2} strokeDasharray="5 3.5" />,
+      s.tree.legendProposal,
     ],
   ];
   return (

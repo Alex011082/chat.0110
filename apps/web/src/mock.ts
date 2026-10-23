@@ -1,12 +1,18 @@
 import {
   displayName,
+  foldDecisions,
   isAgent,
   stampOf,
   type ChatDetail,
   type ChatSummary,
+  type Decision,
+  type DecisionAction,
+  type DecisionEvent,
+  type DecisionEventItem,
   type ForkPoint,
   type ForkRef,
   type GraphChat,
+  type GraphDecision,
   type MessageItem,
   type Participant,
   type RepoInfo,
@@ -14,6 +20,7 @@ import {
   type TimelineResponse,
 } from "@chat0110/chat-protocol";
 import { ApiFailure, type Api } from "./api.ts";
+import { decisionActions } from "./lib/decision.ts";
 
 // Пробный режим для разработки и проверки вида (?mock=1). Только выдуманные
 // данные по контракту api.ts; сети нет. В сборку для сервера не попадает:
@@ -26,6 +33,11 @@ import { ApiFailure, type Api } from "./api.ts";
 // Дерево: RoboChain (корень) → «Выдвижной мост» (Fork из середины) →
 // «Датчики давления» (Fork из Fork); «Захват сбоку» — закрытый Fork;
 // YTNG и QA Board — независимые корни; «Первый тестовый чат» закрыт.
+//
+// Решения (Этап 5) хранятся событиями, как в ветке, и сворачиваются тем же
+// foldDecisions, что у сервера: в RoboChain принято «Вакуумные руки», из Fork
+// «Выдвижной мост» пришло предложение заменить его (ждёт человека; Claude
+// «предложил принять» — статус не меняется); в Fork своё принятое решение.
 
 const OWNER = "Alex011082";
 const REPO = `${OWNER}/chat.0110`;
@@ -61,11 +73,31 @@ function file(t: number, author: string, text: string, r?: string, extra: Partia
 
 const created = (t: number): TimelineItem => ({ kind: "created", id: sha(), actor: ME, created_at: iso(t), url: `${GH}/commit/0` });
 
+/** Событие-файл «propose» — само решение. */
+function propose(
+  t: number,
+  author: string,
+  title: string,
+  text: string,
+  sources: string[],
+  extra: Pick<DecisionEvent, "from_chat" | "supersedes"> = {},
+): DecisionEvent {
+  const id = msgId(t, author);
+  return { id, decision: id, action: "propose", author, created_at: iso(t), title, source_messages: sources, text, ...extra };
+}
+
+/** Событие над решением: accept, reject, reopen, discuss. */
+function act(t: number, author: string, action: Exclude<DecisionAction, "propose">, decision: string, text = ""): DecisionEvent {
+  return { id: msgId(t, author), decision, action, author, created_at: iso(t), source_messages: [], text };
+}
+
 interface Db {
   repos: RepoInfo[];
   chats: ChatSummary[];
   items: Map<string, TimelineItem[]>;
   reasons: Map<string, string>;
+  /** События решений по чатам — как файлы chats/<id>/decisions/. */
+  decisions: Map<string, DecisionEvent[]>;
   readonly: boolean;
 }
 
@@ -179,12 +211,14 @@ function fixtures(mode: string): Db {
   // --- «Захват сбоку» — закрытый Fork из ранней части RoboChain.
   const SIDE = "20261022-s1de";
   const ts = t0 + 3 * HOUR + 10 * MIN;
+  const sideGap = file(ts + 30 * MIN, "claude", "Между платформами при стыковке остаётся 30 см — боковой захват туда не влезает без раздвижной рамы.", "s1b2");
   items.set(SIDE, [
     created(ts),
     file(ts + MIN, ME, "Отдельно проверим захват сбоку: платформы встают бок о бок, рука толкает коробку поперёк.", "s1a1"),
-    file(ts + 30 * MIN, "claude", "Между платформами при стыковке остаётся 30 см — боковой захват туда не влезает без раздвижной рамы.", "s1b2"),
+    sideGap,
     file(ts + 95 * MIN, ME, "Закрываю: сбоку не проходит по габаритам. Возвращаемся к вакууму и мосту.", "s1c3"),
   ]);
+  const sideFrame = propose(ts + 40 * MIN, "claude", "Раздвижная рама для бокового захвата", "Рама раздвигается на 30 см перед стыковкой — тогда рука сбоку проходит.", [sideGap.id]);
   reasons.set(SIDE, "Проверить захват сбоку, не засоряя основной разговор");
 
   // --- «Выдвижной мост» — Fork от предложения Codex.
@@ -196,15 +230,17 @@ function fixtures(mode: string): Db {
     "На неровном полу мост перекашивает. Нужны **датчики давления** в опорах — тогда платформа сама подстроит высоту перед стыковкой.",
     "d9s2",
   );
+  const docking = file(now - 30 * MIN, "codex", "Стыковка: два конусных штыря и электромагнит. Допуск по высоте — ±8 мм, дальше ролики бьют коробку.", "m2b2", {
+    actor: "chatgpt-codex-connector[bot]",
+  });
+  const rollers = file(now - 9 * MIN, "codex", "Ролики с шагом 0,12 м и лентой 0,45 м/с: мост держит 11 коробок в минуту, узкое место — разгон на стыке.", "m5e5");
   items.set(BRIDGE, [
     created(tb),
     file(tb + MIN, ME, "Разбираем мост отдельно: стыковка, ролики, цена.", "m1a1"),
-    file(now - 30 * MIN, "codex", "Стыковка: два конусных штыря и электромагнит. Допуск по высоте — ±8 мм, дальше ролики бьют коробку.", "m2b2", {
-      actor: "chatgpt-codex-connector[bot]",
-    }),
+    docking,
     sensorsPoint,
     file(now - 18 * MIN, ME, "Хорошо, датчики — в отдельный Fork. Здесь считаем ролики.", "m4d4"),
-    file(now - 9 * MIN, "codex", "Ролики с шагом 0,12 м и лентой 0,45 м/с: мост держит 11 коробок в минуту, узкое место — разгон на стыке.", "m5e5"),
+    rollers,
   ]);
   reasons.set(BRIDGE, "Разобрать выдвижной мост, пока основной чат сравнивает варианты");
 
@@ -240,6 +276,36 @@ function fixtures(mode: string): Db {
   const tt = now - 3 * 24 * HOUR;
   items.set(TEST, [created(tt), file(tt + MIN, ME, "Начинаем: Первый тестовый чат.", "t1a1")]);
 
+  // --- Решения.
+  const vacuum = propose(
+    now - 50 * MIN,
+    ME,
+    "Вакуумные руки",
+    "Четыре присоски сверху, без выравнивания по краю. **9 коробок в минуту** — хватает на старт; датчик давления на каждой присоске закрывает риск с пыльным картоном.",
+    [claude1.id, sasha1.id],
+  );
+  const dock = propose(
+    now - 29 * MIN,
+    "codex",
+    "Стыковка: конусные штыри и электромагнит",
+    "Два штыря задают положение, магнит держит. Допуск по высоте ±8 мм — с ним ролики не бьют коробку.",
+    [docking.id],
+  );
+  const toBridge = propose(
+    now - 7 * MIN,
+    ME,
+    "Перейти на выдвижной мост",
+    "В Fork «Выдвижной мост» разобрали стыковку и ролики отдельно от основного разговора.\n\n- Мост держит **11 коробок в минуту** против 9 у вакуумных рук.\n- Стыковка — конусные штыри и электромагнит, допуск ±8 мм.\n- Ремонт — замена ролика за 5 минут.\n\nПредлагается пересмотреть решение «Вакуумные руки».",
+    [docking.id, rollers.id],
+    { from_chat: BRIDGE },
+  );
+  toBridge.supersedes = vacuum.id;
+  const decisions = new Map<string, DecisionEvent[]>([
+    [ROBO, [vacuum, act(now - 50 * MIN + 1000, ME, "accept", vacuum.id), toBridge, act(now - 4 * MIN, "claude", "accept", toBridge.id, "Расчёт сходится — я бы принял.")]],
+    [BRIDGE, [dock, act(now - 27 * MIN, ME, "accept", dock.id)]],
+    [SIDE, [sideFrame, act(ts + 95 * MIN, ME, "reject", sideFrame.id, "Рама съедает выигрыш по времени.")]],
+  ]);
+
   const chats: ChatSummary[] = [
     summary({ chat_id: ROBO, title: "RoboChain — захват коробок", number: 3, created_at: iso(t0), updated_at: iso(now - 5 * MIN) }),
     summary({ chat_id: YTNG, title: "YTNG — второе мнение", number: 2, created_at: iso(ty), updated_at: iso(now - 64 * MIN) }),
@@ -258,7 +324,46 @@ function fixtures(mode: string): Db {
       parent: point(BRIDGE, sensorsPoint.id),
     }),
   ];
-  return { repos, chats, items, reasons, readonly };
+  return { repos, chats, items, reasons, decisions, readonly };
+}
+
+/** Карточки и строки решений — как buildTimeline на сервере. */
+function decisionItems(folded: readonly Decision[]): TimelineItem[] {
+  const out: TimelineItem[] = [];
+  for (const d of folded) {
+    const commit = sha();
+    out.push({
+      kind: "decision", id: d.id, author: d.created_by, display: displayName(d.created_by), decision: d, created_at: d.created_at,
+      actor: ME, commit_sha: commit, url: `${GH}/commit/${commit.slice(0, 7)}`,
+    });
+    for (const h of d.history.slice(1)) {
+      const ev: DecisionEventItem = {
+        kind: "decision_event", id: h.id, decision_id: d.id, action: h.action, title: d.title,
+        author: h.author, display: displayName(h.author), text: h.text, created_at: h.created_at,
+      };
+      if (h.ignored) ev.ignored = true;
+      out.push(ev);
+    }
+  }
+  return out;
+}
+
+/** Порядок ленты, как у сервера: «создал чат» первым, дальше по времени и id. */
+function sortTimeline(items: TimelineItem[]): TimelineItem[] {
+  const rank = (i: TimelineItem) => (i.kind === "created" ? 0 : 1);
+  return items.sort(
+    (a, b) =>
+      rank(a) - rank(b) ||
+      (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+}
+
+function graphDecision(d: Decision): GraphDecision {
+  const g: GraphDecision = { id: d.id, title: d.title, status: d.status, created_at: d.created_at };
+  if (d.decided_at) g.decided_at = d.decided_at;
+  if (d.from_chat) g.from_chat = d.from_chat;
+  if (d.supersedes) g.supersedes = d.supersedes;
+  return g;
 }
 
 function participants(items: readonly TimelineItem[]): Participant[] {
@@ -293,10 +398,31 @@ export function createMockApi(mode: string): Api {
     const c = db.chats.find((x) => x.chat_id === chatId);
     if (c) c.updated_at = new Date().toISOString();
   };
+  const eventsOf = (chatId: string) => {
+    let list = db.decisions.get(chatId);
+    if (!list) db.decisions.set(chatId, (list = []));
+    return list;
+  };
+  const folded = (chatId: string) => foldDecisions(db.decisions.get(chatId) ?? []);
+  const decisionOf = (chatId: string, id: string) => {
+    const d = folded(chatId).find((x) => x.id === id);
+    if (!d) throw new ApiFailure(404, "not_found", "Решение не найдено");
+    return d;
+  };
+  const writable = () => {
+    if (db.readonly) throw new ApiFailure(403, "forbidden", "Нет права записи в репозиторий");
+  };
+  // Заменить можно только принятое решение того же чата — как проверяет сервер.
+  const checkSupersedes = (chatId: string, id: string | undefined) => {
+    if (id && !folded(chatId).some((d) => d.id === id && d.status === "accepted")) {
+      throw new ApiFailure(409, "conflict", "Заменяемое решение не найдено или не принято");
+    }
+  };
 
   const timeline = (chatId: string): TimelineResponse => {
     const c = chatOf(chatId);
-    const items = itemsOf(chatId);
+    const decisions = folded(chatId);
+    const items = sortTimeline([...itemsOf(chatId), ...decisionItems(decisions)]);
     const reason = db.reasons.get(chatId);
     const chat: ChatDetail = {
       ...c,
@@ -329,7 +455,9 @@ export function createMockApi(mode: string): Api {
         items: upTo >= 0 ? msgs.slice(0, upTo + 1) : [],
       };
     }
-    return structuredClone({ chat, items, forks, inherited });
+    // Предложения этого Fork в родителе — со статусами, которые там им дали.
+    const outgoing = c.parent ? folded(c.parent.chat_id).filter((d) => d.from_chat === chatId) : [];
+    return structuredClone({ chat, items, forks, inherited, decisions, outgoing });
   };
 
   return {
@@ -361,6 +489,7 @@ export function createMockApi(mode: string): Api {
       const chats: GraphChat[] = db.chats.map((c) => ({
         ...c,
         messages: ownFiles(db.items.get(c.chat_id) ?? []).map((m) => ({ id: m.id, author: m.author, created_at: m.created_at })),
+        decisions: folded(c.chat_id).map(graphDecision),
       }));
       return structuredClone({ repo: REPO, chats });
     },
@@ -432,6 +561,54 @@ export function createMockApi(mode: string): Api {
       }
       touch(chatId);
       return { ok: true, merge_sha: mergeSha };
+    },
+    async createDecision(_repo, chatId, req) {
+      await wait(800);
+      writable();
+      chatOf(chatId);
+      // Слово «ошибка» в названии — проверить показ ошибки в форме.
+      if (/ошибка/i.test(req.title)) throw new ApiFailure(502, "github_error", "GitHub не принял коммит решения — попробуй ещё раз");
+      checkSupersedes(chatId, req.supersedes);
+      const t = Date.now();
+      const p = propose(t, ME, req.title, req.text ?? "", req.source_messages, req.supersedes ? { supersedes: req.supersedes } : {});
+      const list = eventsOf(chatId);
+      list.push(p);
+      // Два события одним коммитом: принятие — на секунду позже, чтобы порядок был однозначным.
+      if (req.accept) list.push(act(t + 1000, ME, "accept", p.id));
+      touch(chatId);
+      return { decision: structuredClone(decisionOf(chatId, p.id)) };
+    },
+    async decisionAction(_repo, chatId, decisionId, action, req) {
+      await wait(700);
+      writable();
+      const d = decisionOf(chatId, decisionId);
+      // Те же правила, что у сервера: переходы по статусу и непустое обсуждение.
+      if (!decisionActions(d.status, true).includes(action)) {
+        throw new ApiFailure(409, "conflict", "Решение уже в другом статусе — сначала «Открыть заново»");
+      }
+      const text = req?.text?.trim() ?? "";
+      if (action === "discuss" && !text) throw new ApiFailure(400, "bad_request", "Напиши, что обсудить");
+      eventsOf(chatId).push(act(Date.now(), ME, action, decisionId, text));
+      touch(chatId);
+      return { decision: structuredClone(decisionOf(chatId, decisionId)) };
+    },
+    async proposeToParent(_repo, forkChatId, req) {
+      await wait(1000);
+      writable();
+      const fork = chatOf(forkChatId);
+      if (!fork.parent) throw new ApiFailure(400, "bad_request", "Это не Fork — предлагать некому");
+      const parentId = fork.parent.chat_id;
+      chatOf(parentId);
+      if (/ошибка/i.test(req.title)) throw new ApiFailure(502, "github_error", "GitHub не дал записать в ветку родителя — попробуй ещё раз");
+      checkSupersedes(parentId, req.supersedes);
+      const p = propose(Date.now(), ME, req.title, req.text, req.source_messages, {
+        from_chat: forkChatId,
+        ...(req.supersedes ? { supersedes: req.supersedes } : {}),
+      });
+      eventsOf(parentId).push(p);
+      touch(parentId);
+      touch(forkChatId);
+      return { decision: structuredClone(decisionOf(parentId, p.id)) };
     },
     async logout() {
       await wait(100);

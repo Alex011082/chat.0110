@@ -1,6 +1,6 @@
 /// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
-import type { GraphChat, GraphMessage } from "@chat0110/chat-protocol";
+import type { GraphChat, GraphDecision, GraphMessage } from "@chat0110/chat-protocol";
 import { forkParents } from "../src/lib/forest.ts";
 import { layoutTree, TREE_GEOMETRY, type TreeLayout } from "../src/lib/tree.ts";
 
@@ -29,6 +29,19 @@ function chat(id: string, over: Partial<GraphChat> = {}): GraphChat {
     created_by: "alex011082",
     parent: null,
     messages: [],
+    decisions: [],
+    ...over,
+  };
+}
+
+// Решение: id события-предложения — того же вида, что у сообщения.
+function d(hhmm: string, over: Partial<GraphDecision> = {}, rand = "dddd"): GraphDecision {
+  const [h, min] = hhmm.split(":") as [string, string];
+  return {
+    id: `20261023T${h}${min}00Z-alex011082-${rand}`,
+    title: `Решение ${hhmm}`,
+    status: "accepted",
+    created_at: `2026-10-23T${h}:${min}:00.000Z`,
     ...over,
   };
 }
@@ -333,5 +346,100 @@ describe("forkParents — связи ребёнок → родитель", () =>
     expect(map.has(B)).toBe(false);
     expect(map.get(A)).toBe(C);
     expect(map.get(C)).toBe(B);
+  });
+});
+
+describe("layoutTree — решения", () => {
+  const p = [m("10:00"), m("10:10", "claude"), m("10:30", "codex")];
+
+  test("решение — узел-ромб на своей ветке, занимает строку по времени", () => {
+    const dec = d("10:15");
+    const l = layoutTree([chat(A, { messages: p, decisions: [dec] })]);
+    expect(l.nodes.map((n) => n.kind)).toEqual(["start", "dot", "decision", "head"]);
+    const n = node(l, `${A}/d:${dec.id}`);
+    expect(n).toMatchObject({ chatId: A, lane: 0, row: 2, messageId: null, start: false, head: false, decision: dec });
+    expect(l.nodes.filter((x) => x.kind !== "decision").every((x) => x.decision === null)).toBe(true);
+    expect(lane(l, A).decisions).toEqual([n.key]);
+    expect(l.rows).toBe(4);
+    expect(l.height).toBe(TREE_GEOMETRY.padTop + 4 * TREE_GEOMETRY.rowH + TREE_GEOMETRY.padBottom);
+  });
+
+  test("решение после последнего сообщения: итог — сообщение, ствол тянется до решения", () => {
+    const dec = d("10:40");
+    const l = layoutTree([chat(A, { messages: p, decisions: [dec] })]);
+    const head = node(l, `${A}/${p[2]!.id}`);
+    const last = node(l, `${A}/d:${dec.id}`);
+    expect(head).toMatchObject({ kind: "head", head: true });
+    expect(lane(l, A)).toMatchObject({ headKey: head.key, headY: head.y, endY: last.y, topY: node(l, lane(l, A).startKey).y });
+    const edge = l.edges.find((e) => e.kind === "lane")!;
+    expect(edge).toMatchObject({ from: lane(l, A).startKey, to: last.key });
+    expect(edge.d).toBe(`M${head.x} ${lane(l, A).startY}V${last.y}`);
+  });
+
+  test("чат без сообщений, но с решением — узел начала и ромб", () => {
+    const dec = d("10:40");
+    const l = layoutTree([chat(A, { created_at: "2026-10-23T10:30:00.000Z", decisions: [dec] })]);
+    expect(l.nodes.map((n) => n.kind)).toEqual(["start", "decision"]);
+    expect(l.nodes[0]).toMatchObject({ start: true, head: true });
+    expect(l.edges).toHaveLength(1);
+  });
+
+  test("повтор id решения — один узел", () => {
+    const dec = d("10:15");
+    const l = layoutTree([chat(A, { messages: p, decisions: [dec, { ...dec }] })]);
+    expect(l.nodes.filter((n) => n.kind === "decision")).toHaveLength(1);
+  });
+
+  test("точка Fork — всегда сообщение, не решение", () => {
+    // Точки нет среди файлов: ближайшее более раннее событие — сообщение, а не ромб в 10:20.
+    const parent = chat(A, { messages: p, decisions: [d("10:20")] });
+    const child = chat(B, { parent: fork(A, "c2000001"), created_at: "2026-10-23T10:25:00.000Z", messages: [m("10:26")] });
+    const l = layoutTree([parent, child]);
+    expect(lane(l, B).forkKey).toBe(`${A}/${p[1]!.id}`);
+  });
+
+  test("предложение из Fork: провод от конца ветки Fork к ромбу родителя, по статусу", () => {
+    const child = chat(B, { parent: fork(A, p[1]!.id), messages: [m("10:12"), m("10:20", "codex")] });
+    const proposal = d("10:45", { status: "proposed", from_chat: B }, "pppp");
+    const parent = chat(A, { messages: [...p, m("10:40", "claude", "x40x")], decisions: [proposal] });
+    const l = layoutTree([parent, child]);
+    const e = l.edges.find((x) => x.kind === "proposal")!;
+    const to = node(l, `${A}/d:${proposal.id}`);
+    const forkEnd = node(l, lane(l, B).headKey);
+    expect(e).toMatchObject({ chatId: B, to: to.key, from: forkEnd.key, status: "proposed", decisionId: proposal.id });
+    // Ветка Fork кончилась раньше предложения: провод идёт вниз от её конца и входит в ромб сбоку.
+    expect(e.d.startsWith(`M${forkEnd.x} ${forkEnd.y}V`)).toBe(true);
+    expect(e.d.endsWith(`${to.x} ${to.y}`)).toBe(true);
+  });
+
+  test("ветка Fork ещё идёт в момент предложения — провод горизонтальный на строке ромба", () => {
+    const child = chat(B, { parent: fork(A, p[0]!.id), messages: [m("10:05"), m("10:50", "codex")] });
+    const proposal = d("10:35", { status: "accepted", from_chat: B }, "pppp");
+    const l = layoutTree([chat(A, { messages: p, decisions: [proposal] }), child]);
+    const e = l.edges.find((x) => x.kind === "proposal")!;
+    const to = node(l, `${A}/d:${proposal.id}`);
+    expect(e.d).toBe(`M${lane(l, B).x} ${to.y}H${to.x}`);
+    expect(e.status).toBe("accepted");
+  });
+
+  test("Fork-источника нет в дереве — провода нет", () => {
+    const proposal = d("10:35", { status: "proposed", from_chat: "20261001-gone" });
+    const l = layoutTree([chat(A, { messages: p, decisions: [proposal] })]);
+    expect(l.edges.filter((x) => x.kind === "proposal")).toEqual([]);
+  });
+
+  test("замена: тонкая дуга от нового решения к старому на той же ветке", () => {
+    const old = d("10:05", { status: "superseded" }, "old1");
+    const neu = d("10:35", { status: "accepted", supersedes: old.id }, "new1");
+    const l = layoutTree([chat(A, { messages: p, decisions: [old, neu] })]);
+    const e = l.edges.find((x) => x.kind === "supersede")!;
+    const a = node(l, `${A}/d:${neu.id}`);
+    const b = node(l, `${A}/d:${old.id}`);
+    expect(e).toMatchObject({ chatId: A, from: a.key, to: b.key, decisionId: neu.id });
+    expect(e.d.startsWith(`M${a.x} ${a.y}C`)).toBe(true);
+    expect(e.d.endsWith(`${b.x} ${b.y}`)).toBe(true);
+    // Старого решения нет — дуги нет.
+    const l2 = layoutTree([chat(A, { messages: p, decisions: [neu] })]);
+    expect(l2.edges.filter((x) => x.kind === "supersede")).toEqual([]);
   });
 });
