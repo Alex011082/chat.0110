@@ -12,11 +12,12 @@ SERVER="${JARVIS_SERVER:?Задай JARVIS_SERVER (например в ~/.config
 NEW_WEBHOOK=0
 [ "${1:-}" = "--new-webhook-secret" ] && NEW_WEBHOOK=1
 
-read -r -p "GitHub App · Client ID: " CLIENT_ID
-read -r -s -p "GitHub App · Client secret (ввод не виден): " CLIENT_SECRET; echo
-read -r -p "GitHub App · slug (из адреса github.com/apps/<slug>): " SLUG
-read -r -p "Кому можно входить — логины через запятую, * — всем [Alex011082]: " ALLOWED
-ALLOWED=${ALLOWED:-Alex011082}
+# Client ID и slug не секретны и известны — спрашиваем только секрет.
+# Другое приложение или список входа: задать переменными перед запуском.
+CLIENT_ID=${GITHUB_APP_CLIENT_ID:-Iv23liSMB8B7r7rseue4}
+SLUG=${GITHUB_APP_SLUG:-chat-0110}
+ALLOWED=${CHAT0110_ALLOWED_LOGINS:-Alex011082}
+read -r -s -p "Client secret приложения $SLUG (ввод не виден): " CLIENT_SECRET; echo
 
 for v in "$CLIENT_ID" "$CLIENT_SECRET" "$SLUG" "$ALLOWED"; do
   if [ -z "$v" ] || [[ "$v" =~ [[:space:]\"\'\\\$\`] ]]; then
