@@ -109,8 +109,9 @@ export const s = {
   timeline: {
     label: "Лента сообщений",
     agent: "агент",
-    pushedBy: (actor: string) => `запушил ${actor}`,
-    postedBy: (actor: string) => `написал ${actor}`,
+    // Агенты пушат от аккаунта владельца: главное — кто писал, аккаунт — мелко.
+    pushedBy: (actor: string) => `от имени ${actor}`,
+    postedBy: (actor: string) => `от имени ${actor}`,
     file: (sha7: string) => (sha7 ? `файл ${sha7}` : "файл"),
     comment: "комментарий PR",
     fromPr: (n: number) => `PR #${n}`,

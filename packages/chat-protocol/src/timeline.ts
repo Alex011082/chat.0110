@@ -1,4 +1,4 @@
-import { displayName, resolveAuthor } from "./agents.ts";
+import { displayName, isAgent, resolveAuthor } from "./agents.ts";
 import { chatJsonPath, isMessagePath } from "./ids.ts";
 import { parseMessageFile, validIso, type MessageFile } from "./message-file.ts";
 import { parseCommentMeta } from "./meta.ts";
@@ -126,6 +126,20 @@ export interface AgentPrItem {
 export type TimelineItem = MessageItem | CreatedItem | PushItem | ReviewItem | AgentPrItem;
 
 const iso = (value: string) => validIso(value) ?? value;
+
+// Агенты пушат от git-личности владельца (docs/protocol.md, «Поведение
+// агентов на деле»), поэтому логин коммита не говорит, кто пушил. Сначала
+// смотрим сообщение коммита по протоколу, затем трейлер Co-Authored-By.
+function commitAuthor(c: CommitInput, chatId: string): string {
+  const head = c.message.split("\n")[0]!;
+  const byProtocol = head.match(new RegExp(`^chat\\(${chatId}\\):\\s*([a-z0-9][a-z0-9_-]{0,31})\\s*$`));
+  if (byProtocol) return byProtocol[1]!;
+  for (const m of c.message.matchAll(/^Co-Authored-By:\s*([A-Za-z][\w-]*)/gim)) {
+    const who = resolveAuthor(m[1]!);
+    if (isAgent(who)) return who;
+  }
+  return resolveAuthor(c.login ?? c.name);
+}
 const actorOf = (c: { login: string | null; name: string }) => (c.login ? c.login.toLowerCase() : c.name);
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
@@ -163,7 +177,7 @@ export function buildTimeline(input: TimelineInput): TimelineItem[] {
     if (c.added.includes(chatJsonPath(chatId))) {
       items.push({ kind: "created", id: c.sha, actor, created_at: iso(c.date), url: c.url });
     } else if (!c.added.some((p) => isMessagePath(chatId, p))) {
-      const author = resolveAuthor(c.login ?? c.name);
+      const author = commitAuthor(c, chatId);
       items.push({
         kind: "push",
         id: c.sha,

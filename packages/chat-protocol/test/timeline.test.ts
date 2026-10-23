@@ -61,6 +61,27 @@ describe("лента чата", () => {
     });
   });
 
+  test("агент, пушащий от имени владельца, узнаётся по сообщению коммита chat(<id>): <author>", () => {
+    const items = buildTimeline(input({
+      commits: [{ sha: "c5", message: `chat(${CHAT}): codex`, login: "Alex011082", name: "Al Davidov", date: "2026-10-23T10:31:00Z", added: ["chats/x/notes.md"], url: "u5" }],
+    }));
+    expect(items[0]).toMatchObject({ kind: "push", actor: "alex011082", author: "codex", display: "Codex" });
+  });
+
+  test("агент узнаётся по трейлеру Co-Authored-By, если сообщение коммита произвольное", () => {
+    const items = buildTimeline(input({
+      commits: [{ sha: "c6", message: "calc: поправка скорости\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", login: "Alex011082", name: "Alexander Davidov", date: "2026-10-23T10:32:00Z", added: ["calc.md"], url: "u6" }],
+    }));
+    expect(items[0]).toMatchObject({ actor: "alex011082", author: "claude", display: "Claude" });
+  });
+
+  test("трейлер с не-агентом не подменяет автора", () => {
+    const items = buildTimeline(input({
+      commits: [{ sha: "c7", message: "fix\n\nCo-Authored-By: Bob <bob@example.com>", login: "Alex011082", name: "A", date: "2026-10-23T10:33:00Z", added: ["x.md"], url: "u7" }],
+    }));
+    expect(items[0]).toMatchObject({ author: "alex011082" });
+  });
+
   test("коммит без GitHub-логина подписан именем из git", () => {
     const items = buildTimeline(input({
       commits: [{ sha: "c4", message: "x", login: null, name: "Claude", date: "2026-10-23T10:30:00Z", added: [], url: "u4" }],
