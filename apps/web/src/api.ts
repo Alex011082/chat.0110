@@ -9,6 +9,8 @@ import {
   type ChatUpdatedEvent,
   type CreateChatRequest,
   type CreateChatResponse,
+  type ForkRequest,
+  type GraphResponse,
   type Me,
   type PostMessageRequest,
   type PostMessageResponse,
@@ -63,6 +65,10 @@ export interface Api {
   createChat(req: CreateChatRequest): Promise<CreateChatResponse>;
   postMessage(repo: string, chatId: string, req: PostMessageRequest): Promise<PostMessageResponse>;
   acceptAgentPr(repo: string, chatId: string, number: number): Promise<AcceptAgentPrResponse>;
+  /** Fork от сообщения: новый чат, ветка от коммита точки, PR в ветку родителя. */
+  fork(repo: string, chatId: string, req: ForkRequest): Promise<CreateChatResponse>;
+  /** Дерево всех чатов репо (до 200 самых свежих). */
+  graph(repo: string): Promise<GraphResponse>;
   logout(): Promise<void>;
   subscribe(repo: string, handlers: LiveHandlers): () => void;
 }
@@ -166,6 +172,8 @@ export const httpApi: Api = {
   postMessage: (repo, chatId, req) => request<PostMessageResponse>("POST", `${chatPath(repo, chatId)}/messages`, req),
   acceptAgentPr: (repo, chatId, n) =>
     request<AcceptAgentPrResponse>("POST", `${chatPath(repo, chatId)}/agent-prs/${n}/accept`, {}),
+  fork: (repo, chatId, req) => request<CreateChatResponse>("POST", `${chatPath(repo, chatId)}/fork`, req),
+  graph: (repo) => request<GraphResponse>("GET", `/api/graph?repo=${encodeURIComponent(repo)}`),
   logout: async () => {
     await request<unknown>("POST", "/auth/logout", {});
   },

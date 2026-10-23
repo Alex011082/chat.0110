@@ -3,6 +3,8 @@ import {
   resolveAuthor,
   type AgentPrItem,
   type ChatDetail,
+  type ForkRef,
+  type InheritedContext,
   type MessageItem,
   type ReviewItem,
   type TimelineItem,
@@ -10,7 +12,9 @@ import {
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { errorText } from "../api.ts";
 import { prefersReducedMotion, useCopy } from "../hooks.ts";
-import { clock, groupByDay } from "../lib/time.ts";
+import { canForkFrom, groupForks, messageRef } from "../lib/fork.ts";
+import { chatRoute } from "../lib/route.ts";
+import { clock, dateTimeShort, groupByDay } from "../lib/time.ts";
 import { initials, plural, sha7 } from "../lib/text.ts";
 import {
   blockKey,
@@ -23,6 +27,7 @@ import {
   type LocalEntry,
 } from "../lib/timeline.ts";
 import { forms, s } from "../strings.ts";
+import { AppLink } from "../ui/AppLink.tsx";
 import { cx, Key, Lamp, Screen, TextButton, TextLink } from "../ui/kit.tsx";
 import { Markdown } from "../ui/Markdown.tsx";
 
@@ -37,6 +42,12 @@ export interface TimelineProps {
   onReply: (m: MessageItem) => void;
   onRetry: (localId: string) => void;
   onAccept: (n: number) => Promise<void>;
+  /** Дочерние чаты, ответвлённые от сообщений этого. */
+  forks: ForkRef[];
+  /** История родителя до точки Fork (у дочернего чата). */
+  inherited: InheritedContext | null;
+  parentTitle: string | null;
+  onFork: (m: MessageItem) => void;
 }
 
 export function Timeline(p: TimelineProps) {
@@ -53,6 +64,10 @@ export function Timeline(p: TimelineProps) {
     [p.items, p.local],
   );
   const groups = useMemo(() => groupByDay(blocks, blockTime, p.now), [blocks, p.now]);
+  const forks = useMemo(
+    () => groupForks(p.forks, known.flatMap((i) => (i.kind === "message" ? [i.id] : []))),
+    [p.forks, known],
+  );
 
   // Глубокая ссылка #<id>: прокрутить к сообщению и коротко подсветить ободком.
   const flashTo = (id: string): boolean => {
@@ -118,7 +133,12 @@ export function Timeline(p: TimelineProps) {
     if (el) nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 140;
   };
 
-  const ctx: EntryCtx = { ...p, known, flashId, flashDone };
+  const ctx: EntryCtx = { ...p, known, flashId, flashDone, forksAt: forks.byMessage };
+
+  // Раскрытый контекст родителя растит ленту сверху — не утаскиваем человека вниз.
+  const onContext = () => {
+    nearBottom.current = false;
+  };
 
   return (
     <section
@@ -131,6 +151,9 @@ export function Timeline(p: TimelineProps) {
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-[18px] pt-1.5 pb-4 tab:px-[26px] tab:pt-[18px] tab:pb-[30px]"
       >
         <div>
+        {p.chat.parent ? (
+          <ForkOrigin chat={p.chat} inherited={p.inherited} parentTitle={p.parentTitle} now={p.now} onToggle={onContext} />
+        ) : null}
         {groups.length === 0 ? <p className="m-0 py-6 text-copy text-ink-2">{s.timeline.emptyChat}</p> : null}
         {groups.map((g) => (
           <div key={g.key} role="group" aria-label={g.label}>
@@ -144,9 +167,139 @@ export function Timeline(p: TimelineProps) {
             ))}
           </div>
         ))}
+        {forks.rest.length > 0 ? (
+          <div className="flex flex-col gap-2.5 border-t border-line pt-3.5 pb-1">
+            <span className="scale text-ink-2">{s.timeline.forksElsewhere}</span>
+            <ForkChips forks={forks.rest} repo={p.chat.repo} />
+          </div>
+        ) : null}
         </div>
       </div>
     </section>
+  );
+}
+
+// --- Fork: откуда пришёл чат и куда ответвился ---------------------------------
+
+/** Чипы «↳ Fork: …» — Fork всегда в том же репо, что и родитель. */
+function ForkChips({ forks, repo, label }: { forks: ForkRef[]; repo: string; label?: string }) {
+  return (
+    <ul aria-label={label} className="m-0 flex list-none flex-wrap gap-2.5 p-0">
+      {forks.map((f) => (
+        <li key={f.chat_id} className="min-w-0">
+          <AppLink
+            to={chatRoute(repo, f.chat_id)}
+            className={cx(
+              "inline-flex max-w-full min-h-8 items-center gap-1.5 rounded-full bg-body px-3 pb-[3px] pt-px text-cap font-semibold text-ink no-underline plinth-3",
+              "hover:text-ink active:translate-y-px active:plinth-1",
+              f.state === "closed" && "opacity-55",
+            )}
+          >
+            <span className="truncate">{s.timeline.forkChip(f.title, f.number)}</span>
+            {f.state === "closed" ? <span className="shrink-0 font-normal text-ink-2">· {s.timeline.forkChipClosed}</span> : null}
+          </AppLink>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ForkOrigin({
+  chat,
+  inherited,
+  parentTitle,
+  now,
+  onToggle,
+}: {
+  chat: ChatDetail;
+  inherited: InheritedContext | null;
+  parentTitle: string | null;
+  now: number;
+  onToggle: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const parent = chat.parent!;
+  const from = messageRef(inherited?.items ?? [], parent.message_id);
+  const title = inherited?.title ?? parentTitle ?? parent.chat_id;
+  const count = inherited?.items.length ?? 0;
+  const reason = chat.meta?.parent?.reason;
+  const listId = `inherited-${chat.chat_id}`;
+  const groups = useMemo(
+    () => groupByDay(inherited?.items ?? [], (m) => m.created_at, now),
+    [inherited, now],
+  );
+  return (
+    <>
+      <Screen className="mt-2 mb-3 flex flex-col gap-2 px-4 py-3.5 tab:mt-0">
+        <span className="scale text-ink-2">{s.header.fork}</span>
+        <p className="m-0 text-key leading-[1.45] [overflow-wrap:anywhere]">
+          <b className="font-semibold">{s.timeline.forkFrom(title)}</b>
+          {" · "}
+          <span className="text-ink-2">{s.timeline.forkFromMessage(from.display, from.excerpt)}</span>
+        </p>
+        {reason ? <p className="m-0 text-cap leading-[1.45] text-ink-2">{s.timeline.forkReason(reason)}</p> : null}
+        <div className="flex flex-wrap gap-x-5 gap-y-0.5">
+          <AppLink
+            to={chatRoute(chat.repo, parent.chat_id)}
+            hash={parent.message_id}
+            className="inline-flex min-h-8 items-center text-cap text-ink-2 no-underline hover:text-action-ink"
+          >
+            {s.timeline.openParent}
+          </AppLink>
+          {count > 0 ? (
+            <TextButton
+              aria-expanded={open}
+              aria-controls={listId}
+              onClick={() => {
+                onToggle();
+                setOpen((o) => !o);
+              }}
+            >
+              {open ? s.timeline.hideContext : s.timeline.showContext(plural(count, forms.messages))}
+            </TextButton>
+          ) : null}
+        </div>
+      </Screen>
+      {open && inherited ? (
+        <section id={listId} aria-label={s.timeline.contextLabel} className="mb-2 border-b border-line pb-2">
+          <p className="m-0 pb-1 text-cap text-ink-2">{s.timeline.contextNote}</p>
+          {groups.map((g) => (
+            <div key={g.key} role="group" aria-label={g.label}>
+              <div className="flex items-center gap-3 pt-2 pb-1 text-ink-3" aria-hidden="true">
+                <span className="h-px flex-1 bg-line" />
+                <span className="scale">{g.label}</span>
+                <span className="h-px flex-1 bg-line" />
+              </div>
+              {g.items.map((m) => (
+                <InheritedMessage key={m.id} m={m} point={m.id === parent.message_id} />
+              ))}
+            </div>
+          ))}
+        </section>
+      ) : null}
+    </>
+  );
+}
+
+/** Сообщение родителя: приглушённое, только чтение, без клавиш. */
+function InheritedMessage({ m, point }: { m: MessageItem; point: boolean }) {
+  return (
+    <article className="flex gap-3.5 py-3 opacity-60">
+      <Avatar author={m.author} display={m.display} human={!isAgent(m.author)} />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <b className="text-copy font-semibold">{m.display}</b>
+          <span className="text-cap text-ink-2">{dateTimeShort(m.created_at)}</span>
+          {point ? (
+            <span className="flex items-center gap-1.5 text-cap font-semibold text-ink">
+              <span aria-hidden="true" className="size-2 rounded-full bg-ink" />
+              {s.timeline.forkPoint}
+            </span>
+          ) : null}
+        </div>
+        <Markdown text={m.text} />
+      </div>
+    </article>
   );
 }
 
@@ -154,6 +307,7 @@ interface EntryCtx extends TimelineProps {
   known: TimelineItem[];
   flashId: string | null;
   flashDone: boolean;
+  forksAt: Map<string, ForkRef[]>;
 }
 
 function Entry({ block, first, ctx }: { block: Block; first: boolean; ctx: EntryCtx }) {
@@ -225,6 +379,7 @@ function Message({ m, first, published, ctx }: { m: MessageItem; first: boolean;
   const reply = m.reply_to ? resolveReply(ctx.known, m.reply_to) : null;
   const { copied, copy } = useCopy();
   const flashing = ctx.flashId === m.id;
+  const forks = ctx.forksAt.get(m.id);
   return (
     <article
       id={m.id}
@@ -260,7 +415,9 @@ function Message({ m, first, published, ctx }: { m: MessageItem; first: boolean;
           <TextButton onClick={() => copy(`${location.origin}${ctx.path}#${m.id}`)} aria-live="polite">
             {copied ? s.copied : s.timeline.link}
           </TextButton>
+          {canForkFrom(m) ? <TextButton onClick={() => ctx.onFork(m)}>{s.timeline.fork}</TextButton> : null}
         </div>
+        {forks ? <ForkChips forks={forks} repo={ctx.chat.repo} label={s.timeline.forksLabel} /> : null}
       </div>
     </article>
   );

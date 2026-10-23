@@ -2,6 +2,7 @@
 // GitHub App), без Octokit. Всё, что читает и пишет чат, проходит здесь.
 import {
   branchForChat,
+  chatIdFromBranch,
   isChatId,
   isMessagePath,
   messagesDir,
@@ -10,6 +11,8 @@ import {
   type ApiErrorCode,
   type CommentInput,
   type CommitInput,
+  type FileInput,
+  type ForkPoint,
   type RepoInfo,
   type ReviewCommentInput,
   type ReviewInput,
@@ -74,10 +77,14 @@ export interface GitHubCaches {
   // то есть доступ к репо он уже доказал.
   blobs: Lru<string>;
   commitAdded: Lru<string[]>;
+  // Сообщения чата на коммите ветвления Fork: коммит неизменен, значит и
+  // снимок тоже. Ключ — (репо, sha, чат); тот же довод про доступ, что у блобов.
+  // Записей меньше: в каждой — тексты всех сообщений родителя.
+  snapshots: Lru<FileInput[]>;
 }
 
 export function createCaches(): GitHubCaches {
-  return { etag: new Lru(5000), blobs: new Lru(20000), commitAdded: new Lru(20000) };
+  return { etag: new Lru(5000), blobs: new Lru(20000), commitAdded: new Lru(20000), snapshots: new Lru(500) };
 }
 
 export interface GhUser {
@@ -108,6 +115,8 @@ export interface ChatPull {
   author: string;
   headRef: string;
   headSha: string;
+  // Родитель Fork из блока в теле PR: дерево строится из одного списка PR.
+  parent: ForkPoint | null;
 }
 
 export interface MessageEntry {
@@ -253,28 +262,35 @@ export class GitHubClient {
     return { login: u.login, id: u.id, name: u.name ?? null, avatar_url: u.avatar_url };
   }
 
-  // Репо, где стоит App и куда у пользователя есть доступ.
+  // Репо, где стоит App и куда у пользователя есть доступ. Сначала те, куда
+  // пушили последними: новичок попадает в репо с живыми чатами, а не в
+  // первое по алфавиту. Пустые репо (pushed_at = null) — в конце.
   async listRepos(): Promise<RepoInfo[]> {
     const installations = await this.paginate<{ id: number }>("/user/installations?per_page=100");
     const lists = await Promise.all(
       installations.map(async (inst) => {
         const repos = await this.paginate<any>(`/user/installations/${inst.id}/repositories?per_page=100`);
-        return repos.map((r): RepoInfo => ({
-          full_name: r.full_name,
-          owner: r.owner?.login ?? r.full_name.split("/")[0],
-          name: r.name,
-          private: r.private === true,
-          default_branch: r.default_branch,
-          can_push: r.permissions?.push === true,
-          installation_id: inst.id,
+        return repos.map((r): { info: RepoInfo; pushed: string } => ({
+          info: {
+            full_name: r.full_name,
+            owner: r.owner?.login ?? r.full_name.split("/")[0],
+            name: r.name,
+            private: r.private === true,
+            default_branch: r.default_branch,
+            can_push: r.permissions?.push === true,
+            installation_id: inst.id,
+          },
+          pushed: typeof r.pushed_at === "string" ? r.pushed_at : "",
         }));
       }),
     );
     const seen = new Set<string>();
+    const key = (r: RepoInfo) => r.full_name.toLowerCase();
     return lists
       .flat()
-      .filter((r) => !seen.has(r.full_name.toLowerCase()) && seen.add(r.full_name.toLowerCase()))
-      .sort((a, b) => a.full_name.toLowerCase().localeCompare(b.full_name.toLowerCase()));
+      .filter((r) => !seen.has(key(r.info)) && seen.add(key(r.info)))
+      .sort((a, b) => (a.pushed < b.pushed ? 1 : a.pushed > b.pushed ? -1 : key(a.info).localeCompare(key(b.info))))
+      .map((r) => r.info);
   }
 
   async getRepo(repo: RepoRef): Promise<GhRepo> {
@@ -305,10 +321,10 @@ export class GitHubClient {
     return prs.map((p) => toChatPull(repo, p)).find((p) => p?.chatId === chatId) ?? null;
   }
 
-  async listMessageFiles(repo: RepoRef, chatId: string): Promise<MessageEntry[]> {
-    const ref = encodeURIComponent(branchForChat(chatId));
+  // Файлы-сообщения чата на ветке чата или на конкретном коммите (ref = sha).
+  async listMessageFiles(repo: RepoRef, chatId: string, ref: string = branchForChat(chatId)): Promise<MessageEntry[]> {
     try {
-      const list = await this.get<any[]>(`${repoPath(repo)}/contents/${enc(messagesDir(chatId))}?ref=${ref}`);
+      const list = await this.get<any[]>(`${repoPath(repo)}/contents/${enc(messagesDir(chatId))}?ref=${encodeURIComponent(ref)}`);
       if (!Array.isArray(list)) return [];
       return list
         .filter((e) => e.type === "file" && isMessagePath(chatId, e.path))
@@ -330,6 +346,19 @@ export class GitHubClient {
       if (e instanceof GitHubError && e.code === "not_found") return null;
       throw e;
     }
+  }
+
+  // Сообщения чата с текстами на неизменном коммите — для истории родителя
+  // в дочернем чате. Всё, что лежит на коммите ветвления, по построению не
+  // позже точки Fork, поэтому снимок кешируется навсегда.
+  async getMessageFilesAt(repo: RepoRef, chatId: string, sha: string): Promise<FileInput[]> {
+    const key = `${repoKey(repo)}@${sha}:${chatId}`;
+    const hit = this.caches?.snapshots.get(key);
+    if (hit) return hit;
+    const entries = await this.listMessageFiles(repo, chatId, sha);
+    const files = await mapLimit(entries, 8, async (e) => ({ name: e.name, content: await this.getBlob(repo, e.sha) }));
+    this.caches?.snapshots.set(key, files);
+    return files;
   }
 
   async getBlob(repo: RepoRef, sha: string): Promise<string> {
@@ -356,7 +385,10 @@ export class GitHubClient {
 
   // Коммиты ветки чата от merge-base до головы, от старых к новым.
   // Не pulls/:n/commits — тот обрезан на 250 коммитах.
-  async listBranchCommits(repo: RepoRef, defaultBranch: string, chatId: string): Promise<CommitInput[]> {
+  // forkSha — коммит ветвления дочернего чата: ниже него история родителя,
+  // а не события этого чата. Merge-base с основной веткой остаётся пределом
+  // обхода, если sha из тела PR вдруг не предок ветки.
+  async listBranchCommits(repo: RepoRef, defaultBranch: string, chatId: string, forkSha?: string): Promise<CommitInput[]> {
     const branch = branchForChat(chatId);
     let mergeBase: string | null = null;
     try {
@@ -369,7 +401,8 @@ export class GitHubClient {
       throw e;
     }
     const raw = await this.paginate<any>(`${repoPath(repo)}/commits?sha=${encodeURIComponent(branch)}&per_page=100`, {
-      until: (c) => c.sha === mergeBase,
+      // startsWith: в теле PR sha может быть сокращённым (протокол допускает от 7 символов).
+      until: (c) => c.sha === mergeBase || (forkSha !== undefined && String(c.sha).startsWith(forkSha)),
       // Без merge-base обходим немного: иначе прочитали бы всю историю репо.
       maxPages: mergeBase ? 50 : 3,
     });
@@ -419,9 +452,14 @@ export class GitHubClient {
   }
 
   // PR агентов в ветку чата. Их файлы-сообщения показываются «не влитыми».
+  // PR из ветки chat/<id> этого же репо — дочерний чат (Fork), а не ответ
+  // агента. Ветка chat/<id> в чужом форке — это агент без права пуша, он остаётся.
   async listAgentPulls(repo: RepoRef, chatId: string): Promise<AgentPrInput[]> {
     const base = encodeURIComponent(branchForChat(chatId));
-    const prs = await this.paginate<any>(`${repoPath(repo)}/pulls?state=all&base=${base}&per_page=100`, { maxPages: 5 });
+    const all = await this.paginate<any>(`${repoPath(repo)}/pulls?state=all&base=${base}&per_page=100`, { maxPages: 5 });
+    const prs = all.filter(
+      (p) => !(chatIdFromBranch(String(p.head?.ref ?? "")) && String(p.head?.repo?.full_name ?? "").toLowerCase() === repoKey(repo)),
+    );
     return mapLimit(prs, 4, async (p): Promise<AgentPrInput> => {
       const open = p.state === "open";
       const files = (await this.listPullFiles(repo, p.number)).filter((f) => f.status === "added" && isMessagePath(chatId, f.filename));
@@ -551,7 +589,8 @@ function toChatPull(repo: RepoRef, p: any): ChatPull | null {
   if (!isChatId(id)) return null;
   // Ветка чата живёт в этом же репо: PR из форка с похожим именем — не наш чат.
   if (String(p.head?.repo?.full_name ?? "").toLowerCase() !== repoKey(repo)) return null;
-  if (parsePrBody(p.body)?.chat_id !== id) return null;
+  const meta = parsePrBody(p.body);
+  if (meta?.chat_id !== id) return null;
   return {
     chatId: id,
     number: p.number,
@@ -564,6 +603,7 @@ function toChatPull(repo: RepoRef, p: any): ChatPull | null {
     author: p.user?.login ?? "ghost",
     headRef: ref,
     headSha: p.head?.sha ?? "",
+    parent: meta.parent ?? null,
   };
 }
 

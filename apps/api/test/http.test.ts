@@ -124,6 +124,38 @@ describe("маршруты", () => {
     expect((await res.json()).item).toMatchObject({ id: "20261023T100203Z-alex011082-m3p8", text: "Привет", commit_sha: "c" });
   });
 
+  test("GET /api/graph: без сессии — 401, кривой repo — 400 без GitHub, иначе GraphResponse", async () => {
+    const { app, cookie, fake } = await setup();
+    expect((await app(get("/api/graph?repo=a/b"))).status).toBe(401);
+    expect((await app(get("/api/graph?repo=a/b/c", cookie))).status).toBe(400);
+    expect((await app(get("/api/graph", cookie))).status).toBe(400);
+    expect(fake.calls.length).toBe(0);
+    fake
+      .on("GET", /\/pulls\?state=all&sort=updated/, {
+        body: [{
+          number: 5, title: "Тема", body: "<!-- chat0110\nchat_id: 20261023-k7q2\n-->", state: "open", draft: true, html_url: "u",
+          created_at: "2026-10-23T10:00:00Z", updated_at: "2026-10-23T10:00:00Z", user: { login: "Alex011082" },
+          head: { ref: "chat/20261023-k7q2", sha: "h", repo: { full_name: "Alex011082/chat.0110" } }, base: { ref: "main" },
+        }],
+      })
+      .on("GET", `${R}/contents/chats/20261023-k7q2/messages`, { body: [] });
+    const res = await app(get("/api/graph?repo=Alex011082/chat.0110", cookie));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ repo: "Alex011082/chat.0110", chats: [{ chat_id: "20261023-k7q2", parent: null, messages: [] }] });
+  });
+
+  test("POST …/fork: проверка тела до GitHub; неизвестное сообщение — 404", async () => {
+    const { app, cookie, fake } = await setup();
+    const path = "/api/chats/Alex011082/chat.0110/20261023-k7q2/fork";
+    const bad = await app(post(path, { message_id: "../x", title: "Тема" }, { cookie }));
+    expect(bad.status).toBe(400);
+    expect(fake.calls.length).toBe(0);
+    fake.on("GET", /\/pulls\?state=all&head=/, { body: [] });
+    const res = await app(post(path, { message_id: "c1", title: "Тема" }, { cookie }));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ code: "not_found" });
+  });
+
   test("лимит GitHub — 429 с Retry-After", async () => {
     const { app, cookie, fake } = await setup();
     fake.on("GET", "/user/installations", { status: 403, body: { message: "API rate limit exceeded" }, headers: { "x-ratelimit-remaining": "0", "retry-after": "42" } });

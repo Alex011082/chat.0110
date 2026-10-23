@@ -38,26 +38,55 @@ export function withCommentMeta(text: string, meta: CommentMeta): string {
   return `${text.trimEnd()}\n\n<!-- chat0110\n${lines.join("\n")}\n-->\n`;
 }
 
+export interface ForkPoint {
+  chat_id: string;
+  message_id: string;
+  commit_sha: string;
+}
+
 export interface PrMeta {
   chat_id: string;
   schema_version: number;
+  parent?: ForkPoint;
+}
+
+const SHA_RE = /^[0-9a-f]{7,40}$/;
+const FORK_MESSAGE_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+function validForkPoint(chatId: unknown, messageId: unknown, sha: unknown): ForkPoint | null {
+  if (typeof chatId !== "string" || !isChatId(chatId)) return null;
+  if (typeof messageId !== "string" || !FORK_MESSAGE_RE.test(messageId)) return null;
+  if (typeof sha !== "string" || !SHA_RE.test(sha)) return null;
+  return { chat_id: chatId, message_id: messageId, commit_sha: sha };
 }
 
 export function parsePrBody(body: string | null | undefined): PrMeta | null {
   const fields = body ? readBlock(body) : null;
   if (!fields?.chat_id || !isChatId(fields.chat_id)) return null;
-  return { chat_id: fields.chat_id, schema_version: Number(fields.schema_version) || 1 };
+  const meta: PrMeta = { chat_id: fields.chat_id, schema_version: Number(fields.schema_version) || 1 };
+  // Родитель дублируется в теле PR, чтобы дерево строилось из одного списка PR,
+  // без чтения chat.json каждой ветки. Источник истины — chat.json.
+  const parent = validForkPoint(fields.parent_chat_id, fields.parent_message_id, fields.fork_commit_sha);
+  if (parent) meta.parent = parent;
+  return meta;
 }
 
-export function buildPrBody({ chatId, intro }: { chatId: string; intro?: string }): string {
+export function buildPrBody({ chatId, intro, parent }: { chatId: string; intro?: string; parent?: ForkPoint }): string {
   const parts = [];
+  if (parent) {
+    parts.push(`Fork из чата \`${parent.chat_id}\` от сообщения \`${parent.message_id}\` (коммит \`${parent.commit_sha.slice(0, 7)}\`).`);
+  }
   if (intro?.trim()) parts.push(intro.trim());
   parts.push(
     `**Агентам:** прочитайте \`chats/AGENTS.md\` и ответьте новым файлом в ` +
       `\`chats/${chatId}/messages/\` в эту же ветку \`chat/${chatId}\`. ` +
       `Если пушить сюда нельзя — свой PR в ветку чата или комментарий с блоком \`<!-- chat0110 … -->\`.`,
     "Этот PR — чат chat.0110. Его не сливают.",
-    `<!-- chat0110\nchat_id: ${chatId}\nschema_version: 1\n-->`,
+    `<!-- chat0110\nchat_id: ${chatId}\nschema_version: 1\n` +
+      (parent
+        ? `parent_chat_id: ${parent.chat_id}\nparent_message_id: ${parent.message_id}\nfork_commit_sha: ${parent.commit_sha}\n`
+        : "") +
+      "-->",
   );
   return parts.join("\n\n") + "\n";
 }
@@ -68,10 +97,8 @@ export function chatTitleFromPr(title: string): string {
   return title.startsWith(CHAT_TITLE_PREFIX) ? title.slice(CHAT_TITLE_PREFIX.length) : title;
 }
 
-export interface ChatParent {
-  chat_id: string;
-  message_id: string;
-  commit_sha: string;
+export interface ChatParent extends ForkPoint {
+  reason?: string;
 }
 
 export interface ChatMeta {
@@ -108,6 +135,14 @@ export function parseChatJson(content: string): ChatMeta | null {
     title: r.title,
     created_at: createdAt,
     created_by: r.created_by,
-    parent: (r.parent as ChatParent | null) ?? null,
+    parent: parseParent(r.parent),
   };
+}
+
+function parseParent(raw: unknown): ChatParent | null {
+  if (!raw || typeof raw !== "object") return null;
+  const p = raw as Record<string, unknown>;
+  const point = validForkPoint(p.chat_id, p.message_id, p.commit_sha);
+  if (!point) return null;
+  return typeof p.reason === "string" && p.reason.trim() ? { ...point, reason: p.reason } : point;
 }

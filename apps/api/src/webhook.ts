@@ -21,31 +21,40 @@ export interface MappedEvent {
   data: ChatUpdatedEvent | { repo: string };
 }
 
-export function mapWebhookEvent(name: string, payload: any): MappedEvent | null {
+// Одно событие GitHub может разбудить несколько экранов: Fork трогает и
+// ребёнка, и родителя, а пуш в чат меняет и ленту, и дерево чатов.
+export function mapWebhookEvent(name: string, payload: any): MappedEvent[] {
   const repo: unknown = payload?.repository?.full_name;
-  if (typeof repo !== "string") return null;
+  if (typeof repo !== "string") return [];
   const chat = (chat_id: string | null, number: number | null): MappedEvent => ({ event: SSE_CHAT_UPDATED, data: { repo, chat_id, number } });
   const repoUpdated: MappedEvent = { event: SSE_REPO_UPDATED, data: { repo } };
   const pr = payload.pull_request;
 
   switch (name) {
     case "push": {
+      // Дерево показывает сообщения из имён файлов — пуш в чат меняет и его.
       const id = chatIdFromBranch(String(payload.ref ?? ""));
-      return id ? chat(id, null) : repoUpdated;
+      return id ? [chat(id, null), repoUpdated] : [repoUpdated];
     }
     case "pull_request": {
+      const head = chatIdFromBranch(String(pr?.head?.ref ?? ""));
+      const base = chatIdFromBranch(String(pr?.base?.ref ?? ""));
+      // chat/<ребёнок> → chat/<родитель> — PR дочернего чата: у родителя
+      // появляется (или меняется) Fork, у дерева — узел. Номер PR принадлежит
+      // ребёнку, поэтому родителю его не передаём: клиент по номеру ищет чат.
+      if (head && base && head !== base) return [chat(head, pr?.number ?? null), chat(base, null), repoUpdated];
       // base = ветка чата — это PR агента в чат; он тоже часть ленты.
-      const id = chatIdFromBranch(String(pr?.head?.ref ?? "")) ?? chatIdFromBranch(String(pr?.base?.ref ?? ""));
-      return id ? chat(id, pr?.number ?? null) : repoUpdated;
+      const id = head ?? base;
+      return [id ? chat(id, pr?.number ?? null) : repoUpdated];
     }
     case "issue_comment":
       // В событии комментария нет ветки PR — клиент найдёт чат по номеру.
-      return payload.issue?.pull_request ? chat(null, payload.issue.number ?? null) : repoUpdated;
+      return [payload.issue?.pull_request ? chat(null, payload.issue.number ?? null) : repoUpdated];
     case "pull_request_review":
     case "pull_request_review_comment":
-      return chat(chatIdFromBranch(String(pr?.head?.ref ?? "")), pr?.number ?? null);
+      return [chat(chatIdFromBranch(String(pr?.head?.ref ?? "")), pr?.number ?? null)];
     default:
-      return repoUpdated;
+      return [repoUpdated];
   }
 }
 
@@ -75,8 +84,7 @@ export function createWebhook(deps: { secret: string; hub: SseHub; maxDeliveries
     } catch {
       return json(400, { error: "Тело вебхука — не JSON", code: "bad_request" });
     }
-    const mapped = mapWebhookEvent(name, payload);
-    if (mapped) deps.hub.publish(mapped.data.repo, mapped.event, mapped.data);
+    for (const m of mapWebhookEvent(name, payload)) deps.hub.publish(m.data.repo, m.event, m.data);
     return json(200, { ok: true });
   };
 }
