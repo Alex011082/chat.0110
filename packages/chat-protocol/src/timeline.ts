@@ -270,7 +270,11 @@ export function buildTimeline(input: TimelineInput): TimelineItem[] {
     items.push(item);
   }
 
+  // Создание чата — всегда первое событие: время первого сообщения ставится до
+  // коммита, и по одному времени оно оказывалось бы выше «создал чат».
+  const rank = (i: TimelineItem) => (i.kind === "created" ? 0 : 1);
   return items.sort((a, b) =>
-    a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+    rank(a) - rank(b) ||
+    (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
   );
 }

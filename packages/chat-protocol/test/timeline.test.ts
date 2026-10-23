@@ -51,6 +51,14 @@ describe("лента чата", () => {
     expect(items).toEqual([{ kind: "created", id: "c1", actor: "alex011082", created_at: "2026-10-23T10:02:00.000Z", url: "u1" }]);
   });
 
+  test("создание чата всегда первым, даже если первое сообщение помечено раньше коммита", () => {
+    const items = buildTimeline(input({
+      files: [{ name: `${A}.md`, content: `---\ncreated_at: 2026-10-23T10:01:59Z\n---\nПервое` }],
+      commits: [{ sha: "c1", message: "chat: создан", login: "Alex011082", name: "Alex", date: "2026-10-23T10:02:00Z", added: [`chats/${CHAT}/chat.json`, `${dir}/${A}.md`], url: "u1" }],
+    }));
+    expect(items.map((i) => i.kind)).toEqual(["created", "message"]);
+  });
+
   test("коммит без сообщений — событие push с автором-агентом", () => {
     const items = buildTimeline(input({
       commits: [{ sha: "c3", message: "calc: оценка\n\nподробности", login: "chatgpt-codex-connector[bot]", name: "Codex", date: "2026-10-23T10:21:00Z", added: ["chats/x/calc.md"], url: "u3" }],
