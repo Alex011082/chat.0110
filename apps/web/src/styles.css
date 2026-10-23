@@ -1,0 +1,398 @@
+@import "tailwindcss";
+
+/*
+  Визуальный язык — docs/design.md («тихий прибор Braun»).
+  Токены — CSS-переменные; тёмная тема следует за системой.
+  Tailwind видит их через @theme inline: bg-body, text-ink-2, rounded-plate…
+*/
+
+:root {
+  color-scheme: light dark;
+
+  --ground: #d9dbd7;
+  --rail: #e7e9e5;
+  --body: #eef0ec;
+  --base: #dfe2dd;
+  --plate: #f6f7f4;
+  --slot: #cdd0cb;
+  --screen: #e4e7e2;
+  --ink: #1c1e1f;
+  --ink-2: #53585c;
+  --ink-3: #868b8f;
+  --line: rgba(28, 30, 31, 0.11);
+  --pilot: #2f9a55;
+  --lamp: #f0601c;
+  --action: #c94a14;
+  --action-ink: #a83c0c;
+  --lamp-off: #5d6164;
+  --lift: 0 16px 28px -14px rgba(30, 32, 30, 0.38), 0 2px 4px rgba(30, 32, 30, 0.08);
+  --hi: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  --recess: inset 0 2px 4px rgba(0, 0, 0, 0.16);
+
+  /* Производные от токенов design.md — взяты из утверждённого мокапа. */
+  --recess-screen: inset 0 2px 5px rgba(0, 0, 0, 0.14);
+  --recess-row: inset 0 2px 4px rgba(0, 0, 0, 0.14);
+  --lift-row: 0 10px 18px -12px rgba(30, 32, 30, 0.35), 0 1px 2px rgba(30, 32, 30, 0.08);
+  --lift-knob: 0 10px 18px -10px rgba(30, 32, 30, 0.38);
+  --lift-avatar: 0 6px 12px -6px rgba(30, 32, 30, 0.35);
+  --lift-sheet: 0 30px 60px -20px rgba(0, 0, 0, 0.45);
+  /* Клавиша действия: цоколь всегда тёмно-оранжевый, текст белый. */
+  --action-base: #a83c0c;
+  --action-hi: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  /* Чёрная ручка (текущий раздел, аватар человека). */
+  --knob-ink: #1c1e1f;
+  --knob-ink-fg: #eceeea;
+  --knob-ink-base: #0e0f10;
+  --knob-ink-hi: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  --backdrop: rgba(28, 30, 31, 0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #0e0f10;
+    --rail: #202224;
+    --body: #232527;
+    --base: #18191b;
+    --plate: #2a2c2f;
+    --slot: #111213;
+    --screen: #151618;
+    --ink: #eceeea;
+    --ink-2: #a9aeb1;
+    --ink-3: #767c80;
+    --line: rgba(236, 238, 234, 0.1);
+    --pilot: #3fbf6a;
+    --action-ink: #ff7a3d;
+    --lamp-off: #3b3e41;
+    --lift: 0 18px 32px -16px rgba(0, 0, 0, 0.85), 0 1px 2px rgba(0, 0, 0, 0.4);
+    --hi: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+
+    --recess-screen: inset 0 2px 5px rgba(0, 0, 0, 0.5);
+    --recess-row: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+    --recess: inset 0 2px 4px rgba(0, 0, 0, 0.55);
+    --lift-row: 0 10px 18px -12px rgba(0, 0, 0, 0.85), 0 1px 2px rgba(0, 0, 0, 0.4);
+    --lift-knob: 0 10px 18px -10px rgba(0, 0, 0, 0.85);
+    --lift-avatar: 0 6px 12px -6px rgba(0, 0, 0, 0.8);
+    --lift-sheet: 0 30px 60px -20px rgba(0, 0, 0, 0.9);
+    --action-base: #8a300a;
+    --action-hi: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+    /* В анодированном чёрном приборе «чёрная» ручка светлая — иначе её не видно. */
+    --knob-ink: #eceeea;
+    --knob-ink-fg: #1c1e1f;
+    --knob-ink-base: #a9aeb1;
+    --knob-ink-hi: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    --backdrop: rgba(0, 0, 0, 0.6);
+  }
+}
+
+@theme inline {
+  --color-*: initial;
+  --color-ground: var(--ground);
+  --color-rail: var(--rail);
+  --color-body: var(--body);
+  --color-base: var(--base);
+  --color-plate: var(--plate);
+  --color-slot: var(--slot);
+  --color-screen: var(--screen);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-pilot: var(--pilot);
+  --color-lamp: var(--lamp);
+  --color-action: var(--action);
+  --color-action-ink: var(--action-ink);
+  --color-lamp-off: var(--lamp-off);
+  --color-knob-ink: var(--knob-ink);
+  --color-knob-ink-fg: var(--knob-ink-fg);
+  --color-white: #ffffff;
+
+  --font-sans: "Golos Text Variable", "Golos Text", system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Шкала 11, подпись 13, клавиша 14, текст 15, раздел 18, заголовок 30. */
+  --text-scale: 11px;
+  --text-scale--letter-spacing: 0.03em;
+  --text-knob: 11.5px;
+  --text-cap: 13px;
+  --text-key: 14px;
+  --text-copy: 15px;
+  --text-copy--line-height: 1.45;
+  --text-section: 18px;
+  --text-title: 30px;
+  --text-title--line-height: 1.1;
+
+  /* Телефон < 700, без правой колонки 700–1100, всё сразу ≥ 1100. */
+  --breakpoint-*: initial;
+  --breakpoint-tab: 700px;
+  --breakpoint-desk: 1100px;
+
+  --radius-slot: 12px;
+  --radius-row: 14px;
+  --radius-screen: 16px;
+  --radius-body: 18px;
+  --radius-plate: 20px;
+  --radius-device: 24px;
+  --radius-entry: 28px;
+}
+
+/* Невысокий экран (ноутбук 768px): шапка-прибор и поле ввода компактнее,
+   чтобы ленте осталось место. */
+@custom-variant short (@media (max-height: 820px));
+
+/* Цоколь — inset 0 -Npx 0 var(--base): 3 клавиши и ручки, 4 строки, 6 плиты,
+   8 корпуса, 10 главный прибор. */
+@utility plinth-1 {
+  box-shadow: var(--hi), inset 0 -1px 0 var(--base), var(--lift);
+}
+@utility plinth-3 {
+  box-shadow: var(--hi), inset 0 -3px 0 var(--base), var(--lift);
+}
+@utility plinth-6 {
+  box-shadow: var(--hi), inset 0 -6px 0 var(--base), var(--lift);
+}
+@utility plinth-7 {
+  box-shadow: var(--hi), inset 0 -7px 0 var(--base), var(--lift);
+}
+@utility plinth-8 {
+  box-shadow: var(--hi), inset 0 -8px 0 var(--base), var(--lift);
+}
+@utility plinth-10 {
+  box-shadow: var(--hi), inset 0 -10px 0 var(--base), var(--lift);
+}
+@utility plinth-row {
+  box-shadow: var(--hi), inset 0 -4px 0 var(--base), var(--lift-row);
+}
+@utility plinth-knob {
+  box-shadow: var(--hi), inset 0 -3px 0 var(--base), var(--lift-knob);
+}
+@utility plinth-sheet {
+  box-shadow: var(--hi), inset 0 -8px 0 var(--base), var(--lift-sheet);
+}
+@utility plinth-action {
+  box-shadow: var(--action-hi), inset 0 -3px 0 var(--action-base), var(--lift);
+}
+@utility plinth-action-pressed {
+  box-shadow: var(--action-hi), inset 0 -1px 0 var(--action-base), var(--lift);
+}
+@utility plinth-ink {
+  box-shadow: var(--knob-ink-hi), inset 0 -3px 0 var(--knob-ink-base), var(--lift);
+}
+@utility avatar-plastic {
+  box-shadow: var(--hi), inset 0 -3px 0 var(--base), var(--lift-avatar);
+}
+@utility avatar-ink {
+  box-shadow: inset 0 -3px 0 var(--knob-ink-base), var(--lift-avatar);
+}
+/* Утопленное: щель ввода, экран, нажатая (выбранная) строка. */
+@utility recess {
+  box-shadow: var(--recess);
+}
+@utility recess-screen {
+  box-shadow: var(--recess-screen);
+}
+@utility pressed {
+  background-color: var(--screen);
+  box-shadow: var(--recess-row);
+}
+@utility lamp-ring {
+  box-shadow: 0 0 0 2px var(--base);
+}
+/* Внимание — светящийся ободок, а не залитая карточка. */
+@utility bezel {
+  outline: 2px solid var(--lamp);
+  outline-offset: 3px;
+}
+@utility scale {
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+@utility sr-only-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "tnum";
+    -webkit-font-smoothing: antialiased;
+  }
+  a {
+    color: inherit;
+  }
+  a:hover {
+    color: var(--action-ink);
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+  /* Фокус с клавиатуры — оранжевым, как сигнальная лампа. */
+  :focus-visible {
+    outline: 2px solid var(--lamp);
+    outline-offset: 3px;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--lamp) 28%, transparent);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--ink-3) transparent;
+  }
+  dialog::backdrop {
+    background: var(--backdrop);
+  }
+}
+
+/* Щели ввода показывают фокус кольцом поверх внутренней тени. Вне слоёв —
+   иначе утилита recess (слой utilities) перебила бы кольцо. */
+.slot:focus,
+.slot:focus-visible {
+  outline: none;
+  box-shadow: var(--recess), 0 0 0 2px var(--lamp);
+}
+.slot::placeholder {
+  color: var(--ink-3);
+  opacity: 1;
+}
+.slot:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Текст сообщения: Markdown без сырого HTML. */
+@layer components {
+  .md {
+    font-size: 15px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+  .md > * {
+    margin: 0;
+  }
+  .md > * + * {
+    margin-top: 0.6em;
+  }
+  .md a {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-color: var(--ink-3);
+  }
+  .md strong {
+    font-weight: 600;
+  }
+  .md h1,
+  .md h2,
+  .md h3,
+  .md h4 {
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .md h1,
+  .md h2 {
+    font-size: 17px;
+    letter-spacing: -0.01em;
+  }
+  .md ul,
+  .md ol {
+    padding-left: 1.3em;
+  }
+  .md ul {
+    list-style: disc;
+  }
+  .md ol {
+    list-style: decimal;
+  }
+  .md li + li {
+    margin-top: 0.2em;
+  }
+  .md li::marker {
+    color: var(--ink-2);
+  }
+  .md blockquote {
+    padding-left: 12px;
+    border-left: 2px solid var(--line);
+    color: var(--ink-2);
+  }
+  .md code {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    padding: 1px 5px;
+    border-radius: 6px;
+    background: var(--screen);
+  }
+  .md pre {
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: var(--screen);
+    box-shadow: var(--recess-screen);
+    overflow-x: auto;
+  }
+  .md pre code {
+    padding: 0;
+    background: transparent;
+  }
+  .md hr {
+    border: 0;
+    border-top: 1px solid var(--line);
+  }
+  .md table {
+    border-collapse: collapse;
+    font-size: 14px;
+    display: block;
+    overflow-x: auto;
+  }
+  .md th,
+  .md td {
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    text-align: left;
+  }
+  .md th {
+    font-weight: 600;
+  }
+  .md input[type="checkbox"] {
+    margin-right: 6px;
+    accent-color: var(--action);
+  }
+}
+
+/* Глубокая ссылка #<id>: сообщение коротко светится ободком. */
+.flash {
+  outline: 2px solid var(--lamp);
+  outline-offset: 3px;
+  border-radius: 14px;
+  transition: outline-color 1.2s ease 0.8s;
+}
+.flash-done {
+  outline-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
