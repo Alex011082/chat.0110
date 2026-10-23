@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@chat0110/chat-protocol": "workspace:*",
+    "@fontsource-variable/golos-text": "5.3.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-markdown": "10.1.0",
