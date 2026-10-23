@@ -278,3 +278,23 @@ export function buildTimeline(input: TimelineInput): TimelineItem[] {
     (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
   );
 }
+
+// Точка ветвления для Fork: коммит ветки, на котором чат выглядел ровно так,
+// как в момент выбранного сообщения. Для файла — коммит, который его добавил;
+// для комментария (его нет в Git) — последний коммит не позже комментария.
+// Дочерняя ветка создаётся от этого коммита, поэтому её контекст — снимок
+// истории родителя, а не текущее состояние PR (п. 4.4 спеки).
+export function findForkCommit(input: TimelineInput, messageId: string): string | null {
+  const fileName = `${messageId}.md`;
+  for (const c of input.commits) {
+    if (c.added.some((p) => isMessagePath(input.chatId, p) && baseName(p) === fileName)) return c.sha;
+  }
+  const comment = input.comments.find((c) => (parseCommentMeta(c.body).meta.id ?? `c${c.id}`) === messageId);
+  if (!comment) return null;
+  const at = iso(comment.created_at);
+  let point: string | null = null;
+  for (const c of input.commits) {
+    if (iso(c.date) <= at) point = c.sha;
+  }
+  return point ?? input.commits[0]?.sha ?? null;
+}

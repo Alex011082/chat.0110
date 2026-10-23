@@ -1,6 +1,6 @@
 // Контракт HTTP API между apps/api и apps/web. Только типы: обе стороны
 // импортируют их отсюда, чтобы расхождение ловил typecheck, а не пользователь.
-import type { ChatMeta } from "./meta.ts";
+import type { ChatMeta, ForkPoint } from "./meta.ts";
 import type { MessageItem, TimelineItem } from "./timeline.ts";
 
 export interface Me {
@@ -37,6 +37,8 @@ export interface ChatSummary {
   created_at: string;
   updated_at: string;
   created_by: string;
+  // Из блока chat0110 в теле PR: дерево строится без чтения chat.json.
+  parent: ForkPoint | null;
 }
 
 export interface Participant {
@@ -54,9 +56,59 @@ export interface ChatDetail extends ChatSummary {
   can_push: boolean;
 }
 
+// Дочерний чат, ответвлённый от сообщения этого чата.
+export interface ForkRef {
+  chat_id: string;
+  title: string;
+  number: number;
+  url: string;
+  state: "open" | "closed";
+  message_id: string;
+  commit_sha: string;
+  created_at: string;
+  created_by: string;
+}
+
+// История родителя до точки Fork — снимок на коммите ветвления, неизменный.
+export interface InheritedContext {
+  chat_id: string;
+  title: string;
+  number: number | null;
+  message_id: string;
+  commit_sha: string;
+  items: MessageItem[];
+}
+
 export interface TimelineResponse {
   chat: ChatDetail;
   items: TimelineItem[];
+  forks: ForkRef[];
+  inherited: InheritedContext | null;
+}
+
+// POST /api/chats/:owner/:repo/:chatId/fork → CreateChatResponse
+export interface ForkRequest {
+  message_id: string;
+  title: string;
+  reason?: string;
+  first_message?: string;
+}
+
+// GET /api/graph?repo=owner/name — дерево всех чатов репо.
+// Сообщения — только файлы своего чата, из имён файлов: без чтения содержимого.
+export interface GraphMessage {
+  id: string;
+  author: string;
+  created_at: string;
+}
+
+export interface GraphChat extends ChatSummary {
+  messages: GraphMessage[];
+}
+
+export interface GraphResponse {
+  repo: string;
+  chats: GraphChat[];
 }
 
 export interface CreateChatRequest {
