@@ -1,0 +1,24 @@
+name: proverka
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  proverka:
+    # Чаты — тоже PR в main, но кода в них нет: проверять там нечего.
+    if: github.event_name == 'push' || !startsWith(github.head_ref, 'chat/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun test
+      - run: bun run typecheck
+      - run: bun run build
+      - name: Скрипты выката
+        run: for f in deploy/*.sh; do bash -n "$f"; done

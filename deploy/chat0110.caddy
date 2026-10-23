@@ -1,0 +1,12 @@
+# chat.0110 · chat.0110.digital. Ставится deploy/setup.sh в /etc/caddy/chat0110.caddy
+# и подключается строкой `import /etc/caddy/*.caddy` из Caddyfile Jarvis.
+chat.0110.digital {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	# Поток событий не сжимаем: сжатие буферизует SSE, и обновления приходят пачками.
+	@compressible not path /api/events
+	encode @compressible zstd gzip
+	reverse_proxy 127.0.0.1:4340
+}

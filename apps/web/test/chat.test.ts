@@ -1,0 +1,82 @@
+/// <reference types="bun" />
+import { describe, expect, test } from "bun:test";
+import type { ChatSummary } from "@chat0110/chat-protocol";
+import { agentLinkPhrase, arrangeChats, backoffDelay, eventMatchesChat } from "../src/lib/chat.ts";
+
+function chat(over: Partial<ChatSummary>): ChatSummary {
+  return {
+    repo: "Alex011082/chat.0110",
+    chat_id: "20261023-aaaa",
+    title: "Чат",
+    number: 1,
+    state: "open",
+    draft: true,
+    branch: "chat/20261023-aaaa",
+    url: "https://github.com/Alex011082/chat.0110/pull/1",
+    created_at: "2026-10-23T10:00:00Z",
+    updated_at: "2026-10-23T10:00:00Z",
+    created_by: "alex011082",
+    ...over,
+  };
+}
+
+describe("arrangeChats — список: открытые сверху, закрытые в архиве", () => {
+  const list = [
+    chat({ chat_id: "20261021-aaaa", title: "QA Board — нестабильные тесты", updated_at: "2026-10-22T10:00:00Z" }),
+    chat({ chat_id: "20261023-k7q2", title: "RoboChain — захват коробок", updated_at: "2026-10-23T11:58:00Z" }),
+    chat({ chat_id: "20261020-zzzz", title: "Первый тестовый чат", state: "closed", updated_at: "2026-10-20T10:00:00Z" }),
+    chat({ chat_id: "20261022-bbbb", title: "YTNG — второе мнение", updated_at: "2026-10-23T11:00:00Z" }),
+    chat({ chat_id: "20261019-cccc", title: "Старый архив", state: "closed", updated_at: "2026-10-19T10:00:00Z" }),
+  ];
+
+  test("свежие сверху", () => {
+    const { open, archived } = arrangeChats(list, "");
+    expect(open.map((c) => c.chat_id)).toEqual(["20261023-k7q2", "20261022-bbbb", "20261021-aaaa"]);
+    expect(archived.map((c) => c.chat_id)).toEqual(["20261020-zzzz", "20261019-cccc"]);
+  });
+
+  test("поиск по названию без учёта регистра и ё", () => {
+    expect(arrangeChats(list, "  robochain ").open.map((c) => c.chat_id)).toEqual(["20261023-k7q2"]);
+    expect(arrangeChats(list, "ТЕСТ").open.map((c) => c.chat_id)).toEqual(["20261021-aaaa"]);
+    expect(arrangeChats(list, "тест").archived.map((c) => c.chat_id)).toEqual(["20261020-zzzz"]);
+    expect(arrangeChats([chat({ title: "Ёлка" })], "елк").open).toHaveLength(1);
+  });
+
+  test("исходный массив не меняется", () => {
+    const copy = [...list];
+    arrangeChats(list, "");
+    expect(list).toEqual(copy);
+  });
+});
+
+describe("agentLinkPhrase — фраза для агента", () => {
+  test("ровно по договорённости", () => {
+    expect(agentLinkPhrase("https://github.com/Alex011082/chat.0110/pull/3")).toBe(
+      "Прочитай чат https://github.com/Alex011082/chat.0110/pull/3 по правилам chats/AGENTS.md и ответь новым файлом в ту же ветку.",
+    );
+  });
+});
+
+describe("eventMatchesChat — какое событие будит открытую ленту", () => {
+  const open = { repo: "Alex011082/chat.0110", chat_id: "20261023-k7q2", number: 3 };
+  test("тот же chat_id", () => {
+    expect(eventMatchesChat({ repo: "alex011082/chat.0110", chat_id: "20261023-k7q2", number: null }, open)).toBe(true);
+  });
+  test("другой chat_id — нет", () => {
+    expect(eventMatchesChat({ repo: "Alex011082/chat.0110", chat_id: "20261022-bbbb", number: 3 }, open)).toBe(false);
+  });
+  test("chat_id неизвестен — по номеру или на всякий случай", () => {
+    expect(eventMatchesChat({ repo: "Alex011082/chat.0110", chat_id: null, number: 3 }, open)).toBe(true);
+    expect(eventMatchesChat({ repo: "Alex011082/chat.0110", chat_id: null, number: null }, open)).toBe(true);
+    expect(eventMatchesChat({ repo: "Alex011082/chat.0110", chat_id: null, number: 9 }, open)).toBe(true);
+  });
+  test("другой репозиторий — никогда", () => {
+    expect(eventMatchesChat({ repo: "Alex011082/Y-TNG", chat_id: "20261023-k7q2", number: 3 }, open)).toBe(false);
+  });
+});
+
+describe("backoffDelay — переподключение SSE", () => {
+  test("удваивается и упирается в минуту", () => {
+    expect([0, 1, 2, 5, 6, 10].map(backoffDelay)).toEqual([1000, 2000, 4000, 32000, 60000, 60000]);
+  });
+});

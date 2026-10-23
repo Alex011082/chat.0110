@@ -1,0 +1,26 @@
+[Unit]
+Description=chat.0110 · Git-native чат людей и ИИ (chat.0110.digital)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jarvis
+WorkingDirectory=/opt/chat0110/current
+# Секреты — только здесь; ставит их deploy/configure.sh, выкат их не трогает.
+EnvironmentFile=/etc/chat0110/chat0110.env
+Environment=CHAT0110_PORT=4340
+Environment=CHAT0110_PUBLIC_URL=https://chat.0110.digital
+Environment=CHAT0110_WEB_DIST=/opt/chat0110/current/apps/web/dist
+# Файловая система только для чтения, поэтому кеш транспиляции Bun выключен.
+Environment=BUN_RUNTIME_TRANSPILER_CACHE_PATH=0
+ExecStart=/usr/local/bin/bun /opt/chat0110/current/apps/api/src/main.ts
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

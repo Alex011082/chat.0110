@@ -1,0 +1,60 @@
+import type { AppConfig, Me } from "@chat0110/chat-protocol";
+import { useEffect, useState } from "react";
+import { api, ApiFailure, mockRequested, setUnauthorizedHandler } from "./api.ts";
+import { s } from "./strings.ts";
+import { Mark } from "./ui/kit.tsx";
+import { Login } from "./screens/Login.tsx";
+import { Shell } from "./screens/Shell.tsx";
+
+type Auth =
+  | { state: "loading" }
+  | { state: "anon"; notice?: { title: string; text: string } }
+  | { state: "in"; me: Me };
+
+export function App() {
+  const [auth, setAuth] = useState<Auth>({ state: "loading" });
+  const [config, setConfig] = useState<AppConfig | null>(null);
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => setAuth({ state: "anon" }));
+    api()
+      .config()
+      .then(setConfig, () => setConfig(null));
+    api()
+      .me()
+      .then(
+        (me) => setAuth({ state: "in", me }),
+        (e: unknown) => {
+          // 403 на /api/me — вход закрыт списком беты: объясняем, а не крутим вход по кругу.
+          if (e instanceof ApiFailure && e.status === 403) {
+            setAuth({ state: "anon", notice: { title: s.login.forbiddenTitle, text: s.login.forbidden } });
+          } else if (e instanceof ApiFailure && e.status === 401) {
+            setAuth({ state: "anon" });
+          } else {
+            setAuth({ state: "anon", notice: { title: s.errors.generic, text: s.login.serverDown } });
+          }
+        },
+      );
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
+  const logout = async () => {
+    try {
+      await api().logout();
+    } catch {
+      // cookie всё равно уйдёт с перезагрузкой, если сервер её снял; иначе покажем вход ещё раз
+    }
+    // Полная перезагрузка стирает черновики и очередь отправки — на чужом компьютере это важно.
+    location.assign(mockRequested() ? "/?mock=login" : "/");
+  };
+
+  if (auth.state === "loading") {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-ground" role="status" aria-label={s.loading}>
+        <Mark cell={5} className="opacity-40" />
+      </div>
+    );
+  }
+  if (auth.state === "anon") return <Login config={config} notice={auth.notice} />;
+  return <Shell me={auth.me} config={config} onLogout={() => void logout()} />;
+}
