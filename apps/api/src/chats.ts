@@ -7,8 +7,10 @@ import {
   buildTimeline,
   chatJsonPath,
   chatTitleFromPr,
+  decisionPath,
   displayName,
   findForkCommit,
+  foldDecisions,
   isAgent,
   isAuthor,
   isMessagePath,
@@ -16,17 +18,23 @@ import {
   newChatId,
   newMessageId,
   parseChatJson,
+  parseDecisionFile,
   parseMessageFile,
   parseMessageId,
   randomSuffix,
   serializeChatJson,
+  serializeDecisionFile,
   serializeMessageFile,
   type AcceptAgentPrResponse,
   type ChatMeta,
   type ChatParent,
   type ChatSummary,
+  type Decision,
+  type DecisionEvent,
+  type FileInput,
   type ForkPoint,
   type ForkRef,
+  type GraphDecision,
   type GraphMessage,
   type GraphResponse,
   type InheritedContext,
@@ -114,8 +122,9 @@ async function findPull(gh: GitHubClient, repo: RepoRef, chatId: string): Promis
 // точку ветвления ищем ровно в тех коммитах и комментариях, что видит человек.
 async function loadTimelineInput(gh: GitHubClient, repo: RepoRef, info: GhRepo, pull: ChatPull): Promise<{ input: TimelineInput; meta: ChatMeta | null }> {
   const { chatId } = pull;
-  const [entries, commits, comments, reviews, reviewComments, agentPrs, chatJson] = await Promise.all([
+  const [entries, decisions, commits, comments, reviews, reviewComments, agentPrs, chatJson] = await Promise.all([
     gh.listMessageFiles(repo, chatId),
+    gh.getDecisionFiles(repo, chatId),
     // У дочернего чата ветка растёт из ветки родителя: коммиты до точки Fork —
     // история родителя, она приходит отдельно, как inherited.
     gh.listBranchCommits(repo, info.default_branch, chatId, pull.parent?.commit_sha),
@@ -127,7 +136,7 @@ async function loadTimelineInput(gh: GitHubClient, repo: RepoRef, info: GhRepo, 
   ]);
   const files = await mapLimit(entries, 8, async (e) => ({ name: e.name, content: await gh.getBlob(repo, e.sha) }));
   return {
-    input: { chatId, files, commits, comments, reviews, reviewComments, agentPrs },
+    input: { chatId, files, commits, comments, reviews, reviewComments, agentPrs, decisions },
     meta: chatJson === null ? null : parseChatJson(chatJson),
   };
 }
@@ -180,12 +189,28 @@ async function inheritedOf(gh: GitHubClient, repo: RepoRef, parent: ForkPoint, c
   };
 }
 
+// События решений → решения. Битый файл пропускается молча, как в ленте:
+// его пишут и агенты руками.
+function foldFiles(files: FileInput[]): Decision[] {
+  return foldDecisions(files.map((f) => parseDecisionFile(f.name, f.content)).filter((e): e is DecisionEvent => e !== null));
+}
+
+// Что этот Fork предложил родителю: статус решает родитель, поэтому
+// читаем его папку решений на голове его ветки, а не на коммите Fork.
+async function outgoingOf(gh: GitHubClient, repo: RepoRef, chatId: string, parentId: string): Promise<Decision[]> {
+  return foldFiles(await gh.getDecisionFiles(repo, parentId)).filter((d) => d.from_chat === chatId);
+}
+
 export async function getTimeline(gh: GitHubClient, repo: RepoRef, chatId: string): Promise<TimelineResponse> {
   const [info, pull] = await findPull(gh, repo, chatId);
   const [{ input, meta }, chats] = await Promise.all([loadTimelineInput(gh, repo, info, pull), gh.listChatPulls(repo)]);
   const items = buildTimeline(input);
   // Источник истины — chat.json; тело PR — запасной путь (chat.json битый или его нет).
   const parent = meta?.parent ?? pull.parent;
+  const [inherited, outgoing] = await Promise.all([
+    parent ? inheritedOf(gh, repo, parent, chats) : null,
+    parent ? outgoingOf(gh, repo, chatId, parent.chat_id) : [],
+  ]);
   return {
     chat: {
       ...summaryOf(info.full_name, pull),
@@ -196,12 +221,24 @@ export async function getTimeline(gh: GitHubClient, repo: RepoRef, chatId: strin
     },
     items,
     forks: forksOf(chatId, chats),
-    inherited: parent ? await inheritedOf(gh, repo, parent, chats) : null,
+    inherited,
+    decisions: foldFiles(input.decisions ?? []),
+    outgoing,
   };
 }
 
+function graphDecision(d: Decision): GraphDecision {
+  const g: GraphDecision = { id: d.id, title: d.title, status: d.status, created_at: d.created_at };
+  if (d.decided_at) g.decided_at = d.decided_at;
+  if (d.from_chat) g.from_chat = d.from_chat;
+  if (d.supersedes) g.supersedes = d.supersedes;
+  return g;
+}
+
 // Граф репо: все чаты (и закрытые) и их собственные сообщения — только из
-// имён файлов, без чтения блобов, чтобы дерево строилось дёшево.
+// имён файлов, без чтения блобов, чтобы дерево строилось дёшево. Решениям
+// имени файла мало (статус — свёртка событий), но их единицы, а блобы
+// кешируются навсегда по sha.
 export async function getGraph(gh: GitHubClient, repo: RepoRef): Promise<GraphResponse> {
   const [info, pulls] = await Promise.all([gh.getRepo(repo), gh.listChatPulls(repo)]);
   const recent = [...pulls].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0)).slice(0, GRAPH_MAX_CHATS);
@@ -212,7 +249,10 @@ export async function getGraph(gh: GitHubClient, repo: RepoRef): Promise<GraphRe
       const parts = parseMessageId(e.name.replace(/\.md$/, ""));
       if (parts) messages.push({ id: e.name.replace(/\.md$/, ""), author: parts.author, created_at: parts.date });
     }
-    return { ...summaryOf(info.full_name, p), messages: messages.sort(byTimeThenId) };
+    // Внутри чата всё последовательно (и блобы по одному): тогда запросов в
+    // полёте не больше GRAPH_CONCURRENCY, как и до решений.
+    const decisions = foldFiles(await gh.getDecisionFiles(repo, p.chatId, branchForChat(p.chatId), 1)).map(graphDecision);
+    return { ...summaryOf(info.full_name, p), messages: messages.sort(byTimeThenId), decisions };
   });
   return { repo: info.full_name, chats };
 }
@@ -491,4 +531,259 @@ export async function acceptAgentPr(gh: GitHubClient, repo: RepoRef, chatId: str
   const again = await gh.getPull(repo, number);
   if (again?.head?.sha !== headSha) throw new HttpError(409, "conflict", `PR #${number} изменился во время проверки — откройте чат заново`);
   return { ok: true, merge_sha: await gh.mergePull(repo, number, headSha) };
+}
+
+// ——— Решения (Этап 5) ———
+
+const MAX_DECISION_TITLE = 160;
+const MAX_DECISION_TEXT = 20_000;
+const MAX_SOURCES = 50;
+// Как source_messages в протоколе: id файла-сообщения или комментария «c<число>».
+const SOURCE_RE = /^[A-Za-z0-9_-]{1,64}$/;
+export const DECISION_VERBS = ["accept", "reject", "reopen", "discuss"] as const;
+export type DecisionVerb = (typeof DECISION_VERBS)[number];
+const isDecisionVerb = (v: string): v is DecisionVerb => (DECISION_VERBS as readonly string[]).includes(v);
+
+interface ProposalFields {
+  title: string;
+  text: string;
+  source_messages: string[];
+  supersedes?: string;
+}
+
+type ProposalRequest = { title?: unknown; text?: unknown; source_messages?: unknown; supersedes?: unknown };
+
+function decisionText(raw: unknown, what: string): string {
+  if (raw === undefined || raw === null) return "";
+  if (typeof raw !== "string") throw badRequest(`${what}: нужен текст`);
+  const text = raw.replace(/\r\n?/g, "\n").trim();
+  if (text.length > MAX_DECISION_TEXT) throw badRequest(`${what}: длиннее ${MAX_DECISION_TEXT} символов`);
+  return text;
+}
+
+// Всё, что можно проверить без GitHub, проверяется до первого запроса:
+// title, id и supersedes попадают во frontmatter и в имена файлов.
+function normalizeProposal(req: ProposalRequest): ProposalFields {
+  if (typeof req.title !== "string") throw badRequest("Нужно название решения");
+  const title = req.title.replace(/\s+/g, " ").trim();
+  if (!title) throw badRequest("Название решения пустое");
+  if (title.length > MAX_DECISION_TITLE) throw badRequest(`Название решения длиннее ${MAX_DECISION_TITLE} символов`);
+  const text = decisionText(req.text, "Обоснование решения");
+  let sources: string[] = [];
+  if (req.source_messages !== undefined && req.source_messages !== null) {
+    if (!Array.isArray(req.source_messages)) throw badRequest("source_messages — список id сообщений");
+    if (req.source_messages.length > MAX_SOURCES) throw badRequest(`source_messages: не больше ${MAX_SOURCES} сообщений`);
+    for (const id of req.source_messages) {
+      if (typeof id !== "string" || !SOURCE_RE.test(id)) throw badRequest("source_messages: не id сообщения (до 64 символов: латиница, цифры, _ и -)");
+    }
+    sources = req.source_messages as string[];
+  }
+  const out: ProposalFields = { title, text, source_messages: sources };
+  if (!absent(req.supersedes)) {
+    if (typeof req.supersedes !== "string" || !parseMessageId(req.supersedes)) throw badRequest("supersedes — не id решения");
+    out.supersedes = req.supersedes;
+  }
+  return out;
+}
+
+// Ответ API — то, что потом прочтёт из файла лента: пишем, разбираем
+// записанное обратно и сворачиваем, а не собираем решение вручную.
+function reread(ev: DecisionEvent): DecisionEvent {
+  return parseDecisionFile(`${ev.id}.md`, serializeDecisionFile(ev))!;
+}
+
+function decisionOf(events: DecisionEvent[], id: string): Decision {
+  const d = foldDecisions(events).find((x) => x.id === id);
+  if (!d) throw new Error(`решение ${id} пропало при свёртке`);
+  return d;
+}
+
+async function requireDecision(gh: GitHubClient, repo: RepoRef, chatId: string, id: string): Promise<void> {
+  const ds = foldFiles(await gh.getDecisionFiles(repo, chatId));
+  if (!ds.some((d) => d.id === id)) throw badRequest(`supersedes: решение ${id} не найдено в чате ${chatId}`);
+}
+
+// Логин человека, совпавший с id агента (GitHub-пользователь «claude»),
+// свёртка примет за агента: его accept/reject/reopen останутся в истории, но
+// статус не сдвинут. Записать такое событие молча — значит обмануть кнопку.
+function requireHumanVerdict(login: string, action: DecisionVerb): void {
+  if (action !== "discuss" && isAgent(login)) {
+    throw forbidden(`Логин ${login} совпадает с id агента: по протоколу его ${action} не меняет статус решения`);
+  }
+}
+
+async function requirePush(gh: GitHubClient, repo: RepoRef): Promise<void> {
+  const info = await gh.getRepo(repo);
+  if (!info.can_push) throw forbidden(`Нет права на запись в ${info.full_name}`);
+}
+
+// Ветку сдвинул кто-то другой: PATCH без force отвечает 422 «not a fast
+// forward» (или 409). Свой коммит в этом случае просто строится заново.
+const movedUnder = (e: unknown) =>
+  e instanceof GitHubError && (e.ghStatus === 409 || (e.ghStatus === 422 && /fast[- ]forward/i.test(e.ghMessage)));
+
+// Несколько файлов одним коммитом: Contents API кладёт по файлу на коммит,
+// а «предложить и сразу принять» должно появиться в ветке атомарно.
+async function commitFiles(gh: GitHubClient, repo: RepoRef, branch: string, files: { path: string; content: string }[], message: string): Promise<string> {
+  for (let attempt = 1; ; attempt++) {
+    let head: string;
+    try {
+      head = await gh.getBranchHead(repo, branch);
+    } catch (e) {
+      if (e instanceof GitHubError && e.code === "not_found") throw notFound(`Чат не найден: нет ветки ${branch}`);
+      throw e;
+    }
+    const tree = await gh.createTree(repo, await gh.getCommitTree(repo, head), files);
+    const commit = await gh.createCommit(repo, message, tree, [head]);
+    try {
+      await gh.updateBranch(repo, branch, commit);
+      return commit;
+    } catch (e) {
+      if (attempt < 3 && movedUnder(e)) continue;
+      throw e;
+    }
+  }
+}
+
+// Решение в своём чате. С accept: true человек сразу фиксирует принятое —
+// предложение и принятие одним коммитом.
+export async function createDecision(
+  ctx: ChatCtx,
+  repo: RepoRef,
+  chatId: string,
+  req: ProposalRequest & { accept?: unknown },
+): Promise<Decision> {
+  const { gh } = ctx;
+  const now = (ctx.now ?? (() => new Date()))();
+  const rand = ctx.rand ?? randomSuffix;
+  const p = normalizeProposal(req);
+  if (req.accept !== undefined && req.accept !== null && typeof req.accept !== "boolean") throw badRequest("accept — true или false");
+  const accept = req.accept === true;
+  const login = authorOf(ctx.user.login);
+  if (accept) requireHumanVerdict(login, "accept");
+  await requirePush(gh, repo);
+  if (p.supersedes) await requireDecision(gh, repo, chatId, p.supersedes);
+
+  const id = newMessageId(now, login, rand);
+  const events: DecisionEvent[] = [{ id, decision: id, action: "propose", author: login, created_at: isoSeconds(now), ...p }];
+  if (accept) {
+    // Свёртка упорядочивает по времени, затем по id. В ту же секунду принятие
+    // со случайным хвостом могло бы встать раньше предложения и потеряться.
+    const later = new Date(now.getTime() + 1000);
+    const acceptId = newMessageId(later, login, rand);
+    events.push({ id: acceptId, decision: id, action: "accept", author: login, created_at: isoSeconds(later), source_messages: [], text: "" });
+  }
+  const files = events.map((e) => ({ path: decisionPath(chatId, e.id), content: serializeDecisionFile(e) }));
+  await commitFiles(gh, repo, branchForChat(chatId), files, `chat(${chatId}): решение ${login}`);
+  return decisionOf(events.map(reread), id);
+}
+
+// Переходы, которые человек не имел в виду: протокол разрешает свёртке
+// любые, но кнопка «Принять» на уже принятом — это устаревший экран.
+function refusal(d: Decision, action: DecisionVerb): string | null {
+  if (d.status === "superseded") return action === "reopen" ? null : "Решение заменено другим — сначала откройте его заново";
+  const open = d.status === "proposed" || d.status === "under_discussion" || d.status === "reopened";
+  switch (action) {
+    case "accept":
+      return d.status === "accepted" ? "Решение уже принято" : open ? null : "Решение отклонено — чтобы принять, сначала откройте его заново";
+    case "reject":
+      return d.status === "rejected" ? "Решение уже отклонено" : open ? null : "Решение принято — чтобы отклонить, сначала откройте его заново";
+    case "reopen":
+      return open ? "Решение и так открыто" : null;
+    case "discuss":
+      return null;
+  }
+}
+
+export async function decisionAction(
+  ctx: ChatCtx,
+  repo: RepoRef,
+  chatId: string,
+  decisionId: string,
+  action: string,
+  req: { text?: unknown },
+): Promise<Decision> {
+  const { gh } = ctx;
+  const clock = ctx.now ?? (() => new Date());
+  const rand = ctx.rand ?? randomSuffix;
+  if (!parseMessageId(decisionId)) throw badRequest("Неверный id решения");
+  if (!isDecisionVerb(action)) throw badRequest("Неизвестное действие с решением: accept, reject, reopen или discuss");
+  const text = decisionText(req.text, "Комментарий к решению");
+  if (action === "discuss" && !text) throw badRequest("Обсуждение: пустой текст");
+  const login = authorOf(ctx.user.login);
+  requireHumanVerdict(login, action);
+  await requirePush(gh, repo);
+
+  const events = (await gh.getDecisionFiles(repo, chatId))
+    .map((f) => parseDecisionFile(f.name, f.content))
+    .filter((e): e is DecisionEvent => e !== null);
+  const all = foldDecisions(events);
+  const d = all.find((x) => x.id === decisionId);
+  if (!d) throw notFound("Решение не найдено в ветке чата");
+  const reason = refusal(d, action);
+  if (reason) throw new HttpError(409, "conflict", reason);
+
+  // Событие должно встать в свёртке последним: часы сервера могут отставать
+  // от уже записанного (принятие «на секунду позже», часы агента). Для
+  // заменённого решения учитываем и принятие замены — иначе reopen уйдёт под него.
+  const related = [d, ...all.filter((x) => x.id === d.superseded_by)];
+  const last = Math.max(...related.flatMap((x) => x.history.map((h) => Date.parse(h.created_at))).filter(Number.isFinite));
+
+  for (let attempt = 1; ; attempt++) {
+    const at = new Date(Math.max(clock().getTime(), last + 1000));
+    const ev: DecisionEvent = { id: newMessageId(at, login, rand), decision: d.id, action, author: login, created_at: isoSeconds(at), source_messages: [], text };
+    try {
+      await gh.putFile(repo, decisionPath(chatId, ev.id), {
+        message: `chat(${chatId}): ${action} решения ${login}`,
+        content: serializeDecisionFile(ev),
+        branch: branchForChat(chatId),
+      });
+      return decisionOf([...events, reread(ev)], d.id);
+    } catch (e) {
+      // Новый файл не конфликтует по содержимому: 409 — лишь сдвиг головы.
+      if (attempt < 3 && e instanceof GitHubError && e.ghStatus === 409) continue;
+      throw e;
+    }
+  }
+}
+
+// «Предложить родителю» (п. 4.7 спеки): предложение рождается в Fork, но
+// решать его будет родитель — событие пишется в ветку и папку решений родителя.
+export async function proposeToParent(ctx: ChatCtx, repo: RepoRef, forkId: string, req: ProposalRequest): Promise<Decision> {
+  const { gh } = ctx;
+  const clock = ctx.now ?? (() => new Date());
+  const rand = ctx.rand ?? randomSuffix;
+  const p = normalizeProposal(req);
+  const login = authorOf(ctx.user.login);
+
+  const [info, chatJson] = await Promise.all([gh.getRepo(repo), gh.getFileText(repo, chatJsonPath(forkId), branchForChat(forkId))]);
+  if (!info.can_push) throw forbidden(`Нет права на запись в ${info.full_name}`);
+  // Как в ленте: источник истины — chat.json, тело PR — запасной путь.
+  const meta = chatJson === null ? null : parseChatJson(chatJson);
+  let parentId = meta?.parent?.chat_id;
+  if (!parentId) {
+    const pull = await gh.findChatPull(repo, forkId);
+    if (!pull && !meta) throw notFound("Чат не найден: нет PR из ветки chat/" + forkId);
+    parentId = pull?.parent?.chat_id;
+  }
+  if (!parentId) throw badRequest("Это не Fork — предлагать некому");
+  if (p.supersedes) await requireDecision(gh, repo, parentId, p.supersedes);
+
+  for (let attempt = 1; ; attempt++) {
+    const at = clock();
+    const id = newMessageId(at, login, rand);
+    const ev: DecisionEvent = { id, decision: id, action: "propose", author: login, created_at: isoSeconds(at), ...p, from_chat: forkId };
+    try {
+      await gh.putFile(repo, decisionPath(parentId, id), {
+        // По этой строке вебхук будит и Fork: его outgoing живёт в чужой ветке.
+        message: `chat(${parentId}): предложение из Fork ${forkId}`,
+        content: serializeDecisionFile(ev),
+        branch: branchForChat(parentId),
+      });
+      return decisionOf([reread(ev)], id);
+    } catch (e) {
+      if (attempt < 3 && e instanceof GitHubError && e.ghStatus === 409) continue;
+      throw e;
+    }
+  }
 }

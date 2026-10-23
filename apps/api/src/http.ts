@@ -1,9 +1,21 @@
 // Роутер на голом Bun.serve: маршрутов мало, и рукописная таблица проще
 // фреймворка. Каждый параметр из адреса проверяется регуляркой ДО того,
 // как попадёт в URL GitHub.
-import { isChatId, type AppConfig, type CreateChatResponse, type Me, type PostMessageResponse } from "@chat0110/chat-protocol";
+import { isChatId, type AppConfig, type CreateChatResponse, type DecisionResponse, type Me, type PostMessageResponse } from "@chat0110/chat-protocol";
 import { createAuth } from "./auth.ts";
-import { acceptAgentPr, createChat, forkChat, getGraph, getTimeline, listChats, postMessage, type ChatCtx } from "./chats.ts";
+import {
+  acceptAgentPr,
+  createChat,
+  createDecision,
+  decisionAction,
+  forkChat,
+  getGraph,
+  getTimeline,
+  listChats,
+  postMessage,
+  proposeToParent,
+  type ChatCtx,
+} from "./chats.ts";
 import { isLoginAllowed, type Config } from "./config.ts";
 import { HttpError, badRequest, forbidden, notFound, unauthorized } from "./errors.ts";
 import { GitHubClient, createCaches, type Fetch, type GitHubCaches, type RepoRef } from "./github.ts";
@@ -178,6 +190,31 @@ export async function createApp(deps: AppDeps): Promise<App> {
           const body = await readJson(req);
           const out: CreateChatResponse = {
             chat: await forkChat(ctx, repo, chatId, { message_id: body.message_id, title: body.title, reason: body.reason, first_message: body.first_message }),
+          };
+          return json(201, out);
+        }
+        if (method === "POST" && rest.length === 1 && rest[0] === "decisions") {
+          const body = await readJson(req);
+          const out: DecisionResponse = {
+            decision: await createDecision(ctx, repo, chatId, {
+              title: body.title, text: body.text, source_messages: body.source_messages, supersedes: body.supersedes, accept: body.accept,
+            }),
+          };
+          return json(201, out);
+        }
+        // id решения и действие проверяет decisionAction до первого запроса в GitHub.
+        if (method === "POST" && rest.length === 3 && rest[0] === "decisions") {
+          const body = await readJson(req);
+          const out: DecisionResponse = { decision: await decisionAction(ctx, repo, chatId, rest[1]!, rest[2]!, { text: body.text }) };
+          return json(200, out);
+        }
+        // chatId здесь — Fork: предложение уходит в ветку его родителя.
+        if (method === "POST" && rest.length === 1 && rest[0] === "propose") {
+          const body = await readJson(req);
+          const out: DecisionResponse = {
+            decision: await proposeToParent(ctx, repo, chatId, {
+              title: body.title, text: body.text, source_messages: body.source_messages, supersedes: body.supersedes,
+            }),
           };
           return json(201, out);
         }

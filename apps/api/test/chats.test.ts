@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { buildPrBody, parseMessageFile, parsePrBody } from "@chat0110/chat-protocol";
+import { buildPrBody, parseMessageFile, parsePrBody, serializeDecisionFile, type DecisionEvent } from "@chat0110/chat-protocol";
 import { CHATS_AGENTS_MD } from "../src/agents-md.ts";
-import { acceptAgentPr, createChat, forkChat, getGraph, getTimeline, listChats, postMessage, type ChatCtx } from "../src/chats.ts";
+import {
+  acceptAgentPr, createChat, createDecision, decisionAction, forkChat, getGraph, getTimeline, listChats, postMessage, proposeToParent, type ChatCtx,
+} from "../src/chats.ts";
 import { HttpError } from "../src/errors.ts";
 import { GitHubClient, createCaches } from "../src/github.ts";
 import { FakeGitHub, b64 } from "./fake-github.ts";
@@ -11,6 +13,7 @@ const REPO = { owner: "Alex011082", name: "chat.0110" };
 const CHAT = "20261023-k7q2";
 const BRANCH = `chat/${CHAT}`;
 const DIR = `chats/${CHAT}/messages`;
+const DDIR = `chats/${CHAT}/decisions`;
 const A = "20261023T100300Z-alex011082-q9w1";
 const C = "20261023T101400Z-claude-x7k2";
 const G = "20261023T103000Z-codex-g7g7";
@@ -20,11 +23,11 @@ const repoBody = (push = true) => ({
   full_name: "Alex011082/chat.0110", name: "chat.0110", owner: { login: "Alex011082" }, private: false, default_branch: "main", permissions: { push },
 });
 
-function ctx(fake: FakeGitHub, rands: string[] = []): ChatCtx {
+function ctx(fake: FakeGitHub, rands: string[] = [], login = "Alex011082"): ChatCtx {
   let i = 0;
   return {
     gh: new GitHubClient({ token: "ghu", userId: 7, fetch: fake.fetch, caches: createCaches() }),
-    user: { login: "Alex011082", id: 7 },
+    user: { login, id: 7 },
     now: () => NOW,
     rand: () => rands[i++] ?? `r${String(i).padStart(3, "0")}`,
   };
@@ -67,6 +70,22 @@ const ghCommit = (sha: string, login: string | null, name: string, date: string,
   commit: { message, author: { name, date }, committer: { date } },
 });
 const fileText = (id: string, author: string, at: string, extra = "") => `---\nid: ${id}\nauthor: ${author}\n${extra}created_at: ${at}\n---\n`;
+const NOT_FOUND = { status: 404, body: { message: "Not Found" } };
+
+// События решений для фейка: листинг папки decisions и блобы с содержимым.
+function dev(over: Partial<DecisionEvent> & { id: string; action: DecisionEvent["action"] }): DecisionEvent {
+  return { decision: over.id, author: "alex011082", created_at: "2026-10-23T09:00:00.000Z", source_messages: [], text: "", ...over };
+}
+function withDecisions(fake: FakeGitHub, chatId: string, events: DecisionEvent[]): FakeGitHub {
+  const dir = `chats/${chatId}/decisions`;
+  fake.on("GET", `${R}/contents/${dir}`, {
+    body: events.map((e) => ({ type: "file", name: `${e.id}.md`, path: `${dir}/${e.id}.md`, sha: `sd-${e.id}` })),
+  });
+  for (const e of events) fake.on("GET", `${R}/git/blobs/sd-${e.id}`, { body: { content: b64(serializeDecisionFile(e)), encoding: "base64" } });
+  return fake;
+}
+const D1 = "20261023T090000Z-alex011082-d001";
+const D2 = "20261023T093000Z-codex-d002";
 
 describe("список чатов", () => {
   test("PR чатов → ChatSummary, префикс [chat] снят", async () => {
@@ -145,7 +164,8 @@ describe("лента чата", () => {
       .on("GET", `${R}/pulls/9/files`, {
         body: [{ filename: `${DIR}/${G}.md`, status: "added", sha: "sG" }, { filename: "src/hack.ts", status: "added", sha: "sx" }],
       })
-      .on("GET", /\/pulls\?state=all&sort=updated/, { body: [chatPr()] });
+      .on("GET", /\/pulls\?state=all&sort=updated/, { body: [chatPr()] })
+      .on("GET", `${R}/contents/${DDIR}`, NOT_FOUND);
   }
 
   test("собирает TimelineInput из GitHub и отдаёт ленту с участниками", async () => {
@@ -233,6 +253,41 @@ describe("лента чата", () => {
     const fake = new FakeGitHub().on("GET", R, { body: repoBody() }).on("GET", /\/pulls\?state=all&head=/, { body: [] });
     expect((await failure(getTimeline(ctx(fake).gh, REPO, CHAT))).code).toBe("not_found");
   });
+
+  test("решения: карточки в ленте и свёрнутые decisions; коммит с одними решениями — не push", async () => {
+    const D1A = "20261023T104000Z-alex011082-a001";
+    const fake = withDecisions(timelineFake(), CHAT, [
+      dev({ id: D1A, decision: D1, action: "accept", created_at: "2026-10-23T10:40:00.000Z", text: "Берём." }),
+      dev({ id: D1, action: "propose", title: "Вакуумные руки", source_messages: [C], text: "Почему: быстрее." }),
+      dev({ id: D2, action: "propose", author: "codex", created_at: "2026-10-23T09:30:00.000Z", title: "Мост" }),
+    ])
+      .on("GET", /\/commits\?sha=chat%2F20261023-k7q2/, {
+        body: [
+          ghCommit("c4", "Alex011082", "Alex", "2026-10-23T10:40:01Z", `chat(${CHAT}): решение alex011082`),
+          ghCommit("c2", "Alex011082", "Alex", "2026-10-23T10:15:00Z", `chat(${CHAT}): Alex`),
+          ghCommit("c1", "Alex011082", "Alex", "2026-10-23T10:02:00Z", `chat(${CHAT}): создан`),
+          ghCommit("base", "x", "x", "2026-10-01T00:00:00Z", "x"),
+        ],
+      })
+      .on("GET", `${R}/commits/c4`, { body: { files: [{ filename: `${DDIR}/${D1}.md`, status: "added" }, { filename: `${DDIR}/${D1A}.md`, status: "added" }] } });
+    const res = await getTimeline(ctx(fake).gh, REPO, CHAT);
+
+    expect(fake.find("GET", `${R}/contents/${DDIR}`)[0]!.url.searchParams.get("ref")).toBe(BRANCH);
+    expect(res.decisions.map((d) => [d.id, d.status])).toEqual([[D1, "accepted"], [D2, "proposed"]]);
+    expect(res.decisions[0]).toMatchObject({
+      title: "Вакуумные руки", created_by: "alex011082", decided_by: "alex011082", decided_at: "2026-10-23T10:40:00.000Z",
+      source_messages: [C], text: "Почему: быстрее.",
+    });
+    expect(res.decisions[0]!.history.map((h) => [h.id, h.action])).toEqual([[D1, "propose"], [D1A, "accept"]]);
+    expect(res.outgoing).toEqual([]);
+
+    const kinds = res.items.map((i) => `${i.kind}:${i.id}`);
+    expect(kinds).toContain(`decision:${D1}`);
+    expect(kinds).toContain(`decision:${D2}`);
+    expect(kinds).toContain(`decision_event:${D1A}`);
+    expect(kinds).not.toContain("push:c4");
+    expect(res.items.find((i) => i.id === D1)).toMatchObject({ kind: "decision", actor: "alex011082", commit_sha: "c4" });
+  });
 });
 
 describe("лента дочернего чата", () => {
@@ -247,6 +302,8 @@ describe("лента дочернего чата", () => {
       .on("GET", /\/pulls\?state=all&head=Alex011082%3Achat%2F20261023-m2p9/, { body: [childPr(7, PARENT)] })
       .on("GET", /\/pulls\?state=all&sort=updated/, { body: opts.list ?? [childPr(7, PARENT), chatPr()] })
       .on("GET", `${R}/contents/${CHILD_DIR}`, { status: 404, body: { message: "Not Found" } })
+      .on("GET", `${R}/contents/chats/${CHILD}/decisions`, NOT_FOUND)
+      .on("GET", `${R}/contents/${DDIR}`, NOT_FOUND)
       .on("GET", `${R}/contents/chats/${CHILD}/chat.json`, chatJson ? { body: { content: b64(JSON.stringify(chatJson)) } } : { status: 404, body: { message: "Not Found" } })
       .on("GET", `${R}/compare/main...${CHILD_BRANCH}`, { body: { merge_base_commit: { sha: "base" } } })
       // Ветка ребёнка растёт из коммита родителя: ниже S4 — история родителя.
@@ -303,6 +360,22 @@ describe("лента дочернего чата", () => {
     expect(again.inherited?.items.map((i) => i.id)).toEqual([A, C]);
     expect(fake.find("GET", `${R}/contents/${DIR}`).length).toBe(1);
     expect(fake.find("GET", /\/git\/blobs\//).length).toBe(2);
+  });
+
+  test("outgoing: предложения этого Fork в папке решений родителя, со статусом в родителе", async () => {
+    const P1 = "20261023T113000Z-bob-p001";
+    const P2 = "20261023T113500Z-bob-p002";
+    const fake = withDecisions(childFake(), CHAT, [
+      dev({ id: P1, action: "propose", author: "bob", created_at: "2026-10-23T11:30:00.000Z", title: "Мост", from_chat: CHILD }),
+      dev({ id: "20261023T114000Z-alex011082-a001", decision: P1, action: "accept", created_at: "2026-10-23T11:40:00.000Z" }),
+      dev({ id: P2, action: "propose", author: "bob", created_at: "2026-10-23T11:35:00.000Z", title: "Чужой", from_chat: "20261023-zzzz" }),
+      dev({ id: D1, action: "propose", title: "Своё решение родителя" }),
+    ]);
+    const res = await getTimeline(ctx(fake).gh, REPO, CHILD);
+    expect(res.outgoing.map((d) => [d.id, d.status, d.from_chat])).toEqual([[P1, "accepted", CHILD]]);
+    expect(res.decisions).toEqual([]);
+    // Папка решений родителя читается на голове его ветки, а не на коммите Fork.
+    expect(fake.find("GET", `${R}/contents/${DDIR}`)[0]!.url.searchParams.get("ref")).toBe(BRANCH);
   });
 
   test("нет chat.json — родитель из тела PR; PR родителя не найден — номер null, название = id", async () => {
@@ -478,6 +551,7 @@ describe("Fork", () => {
       .on("GET", `${R}/pulls/5/reviews`, { body: [] })
       .on("GET", `${R}/pulls/5/comments`, { body: [] })
       .on("GET", /\/pulls\?state=all&base=chat%2F20261023-k7q2/, { body: [] })
+      .on("GET", `${R}/contents/${DDIR}`, NOT_FOUND)
       // Создание ребёнка: дерево коммита ветвления, протокол там уже есть, CLAUDE.md — нет.
       .on("GET", /\/git\/commits\/[0-9a-f]{40}$/, (c) => ({ body: { tree: { sha: `tree-${c.url.pathname.slice(-40, -36)}` } } }))
       .on("GET", `${R}/contents/chats/AGENTS.md`, { body: { content: b64("x") } })
@@ -598,7 +672,8 @@ describe("граф чатов", () => {
       })
       .on("GET", `${R}/contents/${DIR}`, { body: listing(CHAT, [`${G}.md`, `${C}.md`, "README.md", `${T}.md`, `${A}.md`]) })
       .on("GET", `${R}/contents/chats/${CHILD}/messages`, { body: listing(CHILD, ["20261023T110500Z-bob-x1y2.md"]) })
-      .on("GET", `${R}/contents/chats/20261023-gone/messages`, { status: 404, body: { message: "Not Found" } });
+      .on("GET", `${R}/contents/chats/20261023-gone/messages`, { status: 404, body: { message: "Not Found" } })
+      .on("GET", /\/contents\/chats\/[^/]+\/decisions/, NOT_FOUND);
     const res = await getGraph(ctx(fake).gh, REPO);
 
     expect(res.repo).toBe("Alex011082/chat.0110");
@@ -617,7 +692,30 @@ describe("граф чатов", () => {
     expect(fake.find("GET", /\/git\/blobs\//).length).toBe(0);
   });
 
-  test("не больше 6 листингов разом", async () => {
+  test("решения каждого чата: свёрнутые статусы для дерева", async () => {
+    const D3 = "20261023T120000Z-bob-d003";
+    const fake = withDecisions(new FakeGitHub(), CHAT, [
+      dev({ id: D1, action: "propose", title: "Вакуумные руки" }),
+      dev({ id: "20261023T091000Z-alex011082-a001", decision: D1, action: "accept", created_at: "2026-10-23T09:10:00.000Z" }),
+      dev({ id: D3, action: "propose", author: "bob", created_at: "2026-10-23T12:00:00.000Z", title: "Мост", from_chat: CHILD, supersedes: D1 }),
+      dev({ id: "20261023T121000Z-alex011082-a002", decision: D3, action: "accept", created_at: "2026-10-23T12:10:00.000Z" }),
+      dev({ id: D2, action: "propose", author: "codex", created_at: "2026-10-23T09:30:00.000Z", title: "Ещё" }),
+      dev({ id: "20261023T093100Z-codex-a003", decision: D2, action: "accept", author: "codex", created_at: "2026-10-23T09:31:00.000Z" }),
+    ])
+      .on("GET", R, { body: repoBody() })
+      .on("GET", /\/pulls\?state=all&sort=updated/, { body: [chatPr()] })
+      .on("GET", `${R}/contents/${DIR}`, { body: [] });
+    const res = await getGraph(ctx(fake).gh, REPO);
+    expect(res.chats[0]!.decisions).toEqual([
+      { id: D1, title: "Вакуумные руки", status: "superseded", created_at: "2026-10-23T09:00:00.000Z", decided_at: "2026-10-23T09:10:00.000Z" },
+      // Принятие агентом статус не меняет (п. 2.3 спеки).
+      { id: D2, title: "Ещё", status: "proposed", created_at: "2026-10-23T09:30:00.000Z" },
+      { id: D3, title: "Мост", status: "accepted", created_at: "2026-10-23T12:00:00.000Z", decided_at: "2026-10-23T12:10:00.000Z", from_chat: CHILD, supersedes: D1 },
+    ]);
+    expect(fake.find("GET", `${R}/contents/${DDIR}`)[0]!.url.searchParams.get("ref")).toBe(BRANCH);
+  });
+
+  test("не больше 6 листингов разом — сообщения и решения вместе", async () => {
     const ids = Array.from({ length: 10 }, (_, i) => `20261023-g${String(i).padStart(3, "0")}`);
     let inflight = 0;
     let peak = 0;
@@ -626,7 +724,7 @@ describe("граф чатов", () => {
       .on("GET", /\/pulls\?state=all&sort=updated/, {
         body: ids.map((id, i) => chatPr({ number: 100 + i, head: { ref: `chat/${id}`, sha: "x", repo: { full_name: "Alex011082/chat.0110" } }, body: `<!-- chat0110\nchat_id: ${id}\n-->` })),
       })
-      .on("GET", /\/contents\/chats\/20261023-g\d{3}\/messages/, async () => {
+      .on("GET", /\/contents\/chats\/20261023-g\d{3}\/(messages|decisions)/, async () => {
         peak = Math.max(peak, ++inflight);
         await Bun.sleep(5);
         inflight--;
@@ -635,6 +733,7 @@ describe("граф чатов", () => {
     const res = await getGraph(ctx(fake).gh, REPO);
     expect(res.chats.length).toBe(10);
     expect(peak).toBe(6);
+    expect(fake.find("GET", /\/decisions/).length).toBe(10);
   });
 
   test("не больше 200 чатов — самые свежие по обновлению", async () => {
@@ -648,12 +747,13 @@ describe("граф чатов", () => {
         body: Array.from({ length: n }, (_, i) =>
           chatPr({ number: i + 1, updated_at: updated(i), head: { ref: `chat/${id(i)}`, sha: "x", repo: { full_name: "Alex011082/chat.0110" } }, body: `<!-- chat0110\nchat_id: ${id(i)}\n-->` })),
       })
-      .on("GET", /\/contents\/chats\/[^/]+\/messages/, { body: [] });
+      .on("GET", /\/contents\/chats\/[^/]+\/(messages|decisions)/, { body: [] });
     const res = await getGraph(ctx(fake).gh, REPO);
     expect(res.chats.length).toBe(200);
     expect(res.chats[0]!.chat_id).toBe(id(n - 1));
     expect(res.chats.some((c) => c.chat_id === id(0))).toBe(false);
-    expect(fake.find("GET", /\/contents\//).length).toBe(200);
+    expect(fake.find("GET", /\/contents\/chats\/[^/]+\/messages/).length).toBe(200);
+    expect(fake.find("GET", /\/contents\/chats\/[^/]+\/decisions/).length).toBe(200);
   });
 });
 
@@ -752,5 +852,325 @@ describe("принять PR агента", () => {
       .on("GET", `${R}/pulls/9`, () => ({ body: pull({ head: { sha: ++n === 1 ? "agenthead" : "moved" } }) }));
     expect((await failure(acceptAgentPr(ctx(fake).gh, REPO, CHAT, 9))).code).toBe("conflict");
     expect(fake.find("PUT", /merge/).length).toBe(0);
+  });
+});
+
+describe("решение в чате", () => {
+  const P = "20261023T100203Z-alex011082-d001";
+  const PA = "20261023T100204Z-alex011082-a001";
+
+  function decisionFake(opts: { push?: boolean } = {}) {
+    return new FakeGitHub()
+      .on("GET", R, { body: repoBody(opts.push ?? true) })
+      .on("GET", `${R}/git/ref/heads/${BRANCH}`, { body: { object: { sha: "chathead" } } })
+      .on("GET", `${R}/git/commits/chathead`, { body: { tree: { sha: "chattree" } } })
+      .on("POST", `${R}/git/trees`, { status: 201, body: { sha: "dtree" } })
+      .on("POST", `${R}/git/commits`, { status: 201, body: { sha: "dcommit" } })
+      .on("PATCH", `${R}/git/refs/heads/${BRANCH}`, { body: { object: { sha: "dcommit" } } })
+      .on("GET", `${R}/contents/${DDIR}`, NOT_FOUND);
+  }
+
+  test("предложение: один коммит через Git Data API, ветка сдвигается без force", async () => {
+    const fake = decisionFake();
+    const d = await createDecision(ctx(fake, ["d001"]), REPO, CHAT, {
+      title: "  Вакуумные\n руки ", text: "Почему: быстрее.\r\nРиск — вес.  \n", source_messages: [A, "c101"],
+    });
+
+    const tree = fake.find("POST", `${R}/git/trees`)[0]!.body;
+    expect(tree.base_tree).toBe("chattree");
+    expect(tree.tree).toEqual([{
+      path: `${DDIR}/${P}.md`, mode: "100644", type: "blob",
+      content: `---\nid: ${P}\ndecision: ${P}\naction: propose\nauthor: alex011082\ncreated_at: 2026-10-23T10:02:03Z\ntitle: Вакуумные руки\nsource_messages: ${A}, c101\n---\nПочему: быстрее.\nРиск — вес.\n`,
+    }]);
+    expect(fake.find("POST", `${R}/git/commits`)[0]!.body).toEqual({ message: `chat(${CHAT}): решение alex011082`, tree: "dtree", parents: ["chathead"] });
+    expect(fake.find("PATCH", `${R}/git/refs/heads/${BRANCH}`)[0]!.body).toEqual({ sha: "dcommit", force: false });
+    // Без supersedes чужие решения не читаются.
+    expect(fake.find("GET", `${R}/contents/${DDIR}`).length).toBe(0);
+
+    expect(d).toEqual({
+      id: P, title: "Вакуумные руки", status: "proposed", created_at: "2026-10-23T10:02:03.000Z", created_by: "alex011082",
+      source_messages: [A, "c101"], text: "Почему: быстрее.\nРиск — вес.",
+      history: [{ id: P, action: "propose", author: "alex011082", created_at: "2026-10-23T10:02:03.000Z", text: "Почему: быстрее.\nРиск — вес." }],
+    });
+  });
+
+  test("accept: true — предложение и принятие двумя файлами в одном коммите, принятие на секунду позже", async () => {
+    const fake = decisionFake();
+    const d = await createDecision(ctx(fake, ["d001", "a001"]), REPO, CHAT, { title: "Мост", source_messages: [], accept: true });
+    expect(fake.find("POST", `${R}/git/commits`).length).toBe(1);
+    const files = fake.find("POST", `${R}/git/trees`)[0]!.body.tree;
+    expect(files.map((f: any) => f.path)).toEqual([`${DDIR}/${P}.md`, `${DDIR}/${PA}.md`]);
+    expect(files[1].content).toBe(`---\nid: ${PA}\ndecision: ${P}\naction: accept\nauthor: alex011082\ncreated_at: 2026-10-23T10:02:04Z\n---\n\n`);
+    expect(d).toMatchObject({ id: P, status: "accepted", decided_by: "alex011082", decided_at: "2026-10-23T10:02:04.000Z" });
+    expect(d.history.map((h) => [h.id, h.action, h.author])).toEqual([[P, "propose", "alex011082"], [PA, "accept", "alex011082"]]);
+  });
+
+  test("ветку сдвинули (422 not a fast forward) — перечитываем голову и коммитим заново", async () => {
+    let heads = 0;
+    let patches = 0;
+    const fake = decisionFake()
+      .on("GET", `${R}/git/ref/heads/${BRANCH}`, () => ({ body: { object: { sha: ++heads === 1 ? "chathead" : "chathead2" } } }))
+      .on("GET", `${R}/git/commits/chathead2`, { body: { tree: { sha: "chattree2" } } })
+      .on("PATCH", `${R}/git/refs/heads/${BRANCH}`, () =>
+        ++patches === 1 ? { status: 422, body: { message: "Update is not a fast forward" } } : { body: { object: { sha: "dcommit" } } });
+    const d = await createDecision(ctx(fake, ["d001"]), REPO, CHAT, { title: "Мост", source_messages: [] });
+    expect(d.id).toBe(P);
+    expect(fake.find("POST", `${R}/git/trees`).map((c) => c.body.base_tree)).toEqual(["chattree", "chattree2"]);
+    expect(fake.find("POST", `${R}/git/commits`).map((c) => c.body.parents)).toEqual([["chathead"], ["chathead2"]]);
+  });
+
+  test("ветку сдвигают каждый раз — conflict после трёх попыток; другие 422 не повторяются", async () => {
+    const busy = decisionFake().on("PATCH", `${R}/git/refs/heads/${BRANCH}`, { status: 422, body: { message: "Update is not a fast forward" } });
+    expect((await failure(createDecision(ctx(busy), REPO, CHAT, { title: "Мост", source_messages: [] }))).code).toBe("conflict");
+    expect(busy.find("PATCH", /refs/).length).toBe(3);
+    const other = decisionFake().on("PATCH", `${R}/git/refs/heads/${BRANCH}`, { status: 422, body: { message: "Object does not exist" } });
+    expect((await failure(createDecision(ctx(other), REPO, CHAT, { title: "Мост", source_messages: [] }))).code).toBe("conflict");
+    expect(other.find("PATCH", /refs/).length).toBe(1);
+  });
+
+  test("supersedes — только существующее решение этого чата", async () => {
+    const ok = withDecisions(decisionFake(), CHAT, [dev({ id: D1, action: "propose", title: "Старое" })]);
+    const d = await createDecision(ctx(ok, ["d001"]), REPO, CHAT, { title: "Новое", source_messages: [], supersedes: D1 });
+    expect(d.supersedes).toBe(D1);
+    expect(fake0(ok)).toContain(`supersedes: ${D1}\n`);
+    expect(ok.find("GET", `${R}/contents/${DDIR}`)[0]!.url.searchParams.get("ref")).toBe(BRANCH);
+
+    const missing = withDecisions(decisionFake(), CHAT, [dev({ id: D1, action: "propose", title: "Старое" })]);
+    const err = await failure(createDecision(ctx(missing), REPO, CHAT, { title: "Новое", source_messages: [], supersedes: "20261023T080000Z-alex011082-none" }));
+    expect(err.code).toBe("bad_request");
+    expect(err.message).toContain("не найдено");
+    expect(missing.find("POST", /./).length).toBe(0);
+  });
+
+  test("проверки до GitHub: название, текст, source_messages, supersedes, accept", async () => {
+    const fake = decisionFake();
+    const ok = { title: "Мост", source_messages: [] as unknown[] };
+    for (const bad of [
+      { source_messages: [] },
+      { ...ok, title: "  " },
+      { ...ok, title: 5 },
+      { ...ok, title: "x".repeat(161) },
+      { ...ok, text: "я".repeat(20_001) },
+      { ...ok, text: 5 },
+      { ...ok, source_messages: "c1" },
+      { ...ok, source_messages: Array.from({ length: 51 }, (_, i) => `c${i}`) },
+      { ...ok, source_messages: ["../x"] },
+      { ...ok, source_messages: ["a".repeat(65)] },
+      { ...ok, source_messages: [5] },
+      { ...ok, supersedes: "../x" },
+      { ...ok, supersedes: 5 },
+      { ...ok, accept: "yes" },
+    ]) {
+      expect((await failure(createDecision(ctx(fake), REPO, CHAT, bad as any))).code).toBe("bad_request");
+    }
+    expect(fake.calls.length).toBe(0);
+    // Ровно на границах — можно.
+    await createDecision(ctx(fake, ["d001"]), REPO, CHAT, { title: "x".repeat(160), text: "я".repeat(20_000), source_messages: Array.from({ length: 50 }, (_, i) => `c${i}`) });
+    expect(fake.find("PATCH", /refs/).length).toBe(1);
+  });
+
+  test("нет права на запись — forbidden; нет ветки чата — not_found", async () => {
+    const ro = decisionFake({ push: false });
+    expect((await failure(createDecision(ctx(ro), REPO, CHAT, { title: "Мост", source_messages: [] }))).code).toBe("forbidden");
+    expect(ro.find("POST", /./).length).toBe(0);
+    const gone = decisionFake().on("GET", `${R}/git/ref/heads/${BRANCH}`, NOT_FOUND);
+    const err = await failure(createDecision(ctx(gone), REPO, CHAT, { title: "Мост", source_messages: [] }));
+    expect(err.code).toBe("not_found");
+    expect(err.message).toContain(BRANCH);
+  });
+
+  // Содержимое единственного файла в дереве коммита.
+  function fake0(fake: FakeGitHub): string {
+    return fake.find("POST", `${R}/git/trees`)[0]!.body.tree[0].content;
+  }
+});
+
+describe("действие с решением", () => {
+  const EV = "20261023T100203Z-alex011082-e001";
+  const putPath = `${R}/contents/${DDIR}/${EV}.md`;
+  const propose = dev({ id: D1, action: "propose", title: "Вакуумные руки" });
+  const at = (hhmmss: string) => `2026-10-23T${hhmmss.slice(0, 2)}:${hhmmss.slice(2, 4)}:${hhmmss.slice(4, 6)}.000Z`;
+  const human = (action: DecisionEvent["action"], hhmmss: string, decision = D1) =>
+    dev({ id: `20261023T${hhmmss}Z-alex011082-${action.slice(0, 1)}${hhmmss.slice(3)}`, decision, action, created_at: at(hhmmss) });
+
+  function actionFake(events: DecisionEvent[], opts: { push?: boolean } = {}) {
+    return withDecisions(new FakeGitHub(), CHAT, events)
+      .on("GET", R, { body: repoBody(opts.push ?? true) })
+      .on("PUT", /\/contents\/chats\/20261023-k7q2\/decisions\//, { status: 201, body: { commit: { sha: "evcommit", html_url: "https://github.com/c/evcommit" } } });
+  }
+
+  test("accept: один PUT в ветку чата, автор — логин человека; решение свёрнуто заново", async () => {
+    const fake = actionFake([propose]);
+    const d = await decisionAction(ctx(fake, ["e001"]), REPO, CHAT, D1, "accept", { text: " Берём. " });
+    const put = fake.find("PUT", putPath)[0]!.body;
+    expect(put.branch).toBe(BRANCH);
+    expect(put.message).toBe(`chat(${CHAT}): accept решения alex011082`);
+    expect(Buffer.from(put.content, "base64").toString("utf8")).toBe(
+      `---\nid: ${EV}\ndecision: ${D1}\naction: accept\nauthor: alex011082\ncreated_at: 2026-10-23T10:02:03Z\n---\nБерём.\n`,
+    );
+    expect(fake.find("GET", `${R}/contents/${DDIR}`)[0]!.url.searchParams.get("ref")).toBe(BRANCH);
+    expect(d).toMatchObject({ id: D1, status: "accepted", decided_by: "alex011082", decided_at: "2026-10-23T10:02:03.000Z" });
+    expect(d.history.at(-1)).toEqual({ id: EV, action: "accept", author: "alex011082", created_at: "2026-10-23T10:02:03.000Z", text: "Берём." });
+  });
+
+  test("reject, discuss и reopen меняют статус как в протоколе", async () => {
+    expect((await decisionAction(ctx(actionFake([propose]), ["e001"]), REPO, CHAT, D1, "reject", {})).status).toBe("rejected");
+    expect((await decisionAction(ctx(actionFake([propose]), ["e001"]), REPO, CHAT, D1, "discuss", { text: "А вес?" })).status).toBe("under_discussion");
+    const accepted = [propose, human("accept", "091000")];
+    expect((await decisionAction(ctx(actionFake(accepted), ["e001"]), REPO, CHAT, D1, "reopen", {})).status).toBe("reopened");
+  });
+
+  test("бессмысленный переход — 409 с причиной, ничего не пишется", async () => {
+    const D3 = "20261023T092000Z-alex011082-d003";
+    const superseded = [
+      propose, human("accept", "091000"),
+      dev({ id: D3, action: "propose", title: "Мост", supersedes: D1, created_at: at("092000") }), human("accept", "093000", D3),
+    ];
+    const cases: [DecisionEvent[], "accept" | "reject" | "reopen" | "discuss", RegExp][] = [
+      [[propose, human("accept", "091000")], "accept", /уже принято/],
+      [[propose, human("reject", "091000")], "reject", /уже отклонено/],
+      [[propose, human("reject", "091000")], "accept", /откройте/],
+      [[propose, human("accept", "091000")], "reject", /откройте/],
+      [[propose], "reopen", /открыто/],
+      [[propose, human("discuss", "091000")], "reopen", /открыто/],
+      [superseded, "accept", /заменено/],
+      [superseded, "reject", /заменено/],
+      [superseded, "discuss", /заменено/],
+    ];
+    for (const [events, action, reason] of cases) {
+      const fake = actionFake(events);
+      const err = await failure(decisionAction(ctx(fake), REPO, CHAT, D1, action, { text: "x" }));
+      expect([action, err.status, err.code]).toEqual([action, 409, "conflict"]);
+      expect(err.message).toMatch(reason);
+      expect(fake.find("PUT", /./).length).toBe(0);
+    }
+    expect((await decisionAction(ctx(actionFake(superseded), ["e001"]), REPO, CHAT, D1, "reopen", {})).status).toBe("reopened");
+  });
+
+  const P0 = "20261023T100203Z-alex011082-d000";
+  const P0A = "20261023T100204Z-alex011082-a000";
+
+  test("событие встаёт после последнего события решения, даже если часы отстают", async () => {
+    // Принятие из «создать и принять» стоит на секунду впереди часов сервера.
+    const fake = actionFake([dev({ id: P0, action: "propose", title: "Т", created_at: at("100203") }), dev({ id: P0A, decision: P0, action: "accept", created_at: at("100204") })]);
+    const d = await decisionAction(ctx(fake, ["e001"]), REPO, CHAT, P0, "reopen", {});
+    expect(d.status).toBe("reopened");
+    expect(fake.find("PUT", `${R}/contents/${DDIR}/20261023T100205Z-alex011082-e001.md`).length).toBe(1);
+  });
+  test("решения нет — 404; кривой id и действие, пустое обсуждение — 400 до записи", async () => {
+    const fake = actionFake([propose]);
+    expect((await failure(decisionAction(ctx(fake), REPO, CHAT, "20261023T080000Z-alex011082-none", "accept", {}))).code).toBe("not_found");
+    for (const [id, action, body] of [
+      ["../x", "accept", {}],
+      [D1, "delete", {}],
+      [D1, "discuss", {}],
+      [D1, "discuss", { text: "  " }],
+      [D1, "accept", { text: "я".repeat(20_001) }],
+      [D1, "accept", { text: 5 }],
+    ] as const) {
+      expect((await failure(decisionAction(ctx(fake), REPO, CHAT, id, action as any, body as any))).code).toBe("bad_request");
+    }
+    expect(fake.find("PUT", /./).length).toBe(0);
+  });
+
+  test("логин совпадает с id агента — его accept/reject статус не изменят, поэтому отказ; обсуждать можно", async () => {
+    const fake = actionFake([propose]);
+    const err = await failure(decisionAction(ctx(fake, ["e001"], "Claude"), REPO, CHAT, D1, "accept", {}));
+    expect(err.code).toBe("forbidden");
+    expect(fake.find("PUT", /./).length).toBe(0);
+    const d = await decisionAction(ctx(fake, ["e001"], "Claude"), REPO, CHAT, D1, "discuss", { text: "Мнение." });
+    expect(d.history.at(-1)).toMatchObject({ action: "discuss", author: "claude" });
+  });
+
+  test("голова ветки сдвинулась (409) — повтор с новым id; нет права на запись — forbidden", async () => {
+    let n = 0;
+    const fake = actionFake([propose]).on("PUT", /\/contents\/chats\/20261023-k7q2\/decisions\//, () =>
+      ++n < 2 ? { status: 409, body: { message: "is at abc but expected def" } } : { status: 201, body: { commit: { sha: "ok", html_url: "u" } } });
+    await decisionAction(ctx(fake, ["e001", "e002"]), REPO, CHAT, D1, "accept", {});
+    expect(fake.find("PUT", /./).map((c) => c.url.pathname.split("/").pop())).toEqual(["20261023T100203Z-alex011082-e001.md", "20261023T100203Z-alex011082-e002.md"]);
+    const ro = actionFake([propose], { push: false });
+    expect((await failure(decisionAction(ctx(ro), REPO, CHAT, D1, "accept", {}))).code).toBe("forbidden");
+    expect(ro.find("PUT", /./).length).toBe(0);
+  });
+});
+
+describe("предложить родителю", () => {
+  const PARENT = { chat_id: CHAT, message_id: C, commit_sha: S2 };
+  const EV = "20261023T100203Z-alex011082-p001";
+  const putPath = `${R}/contents/${DDIR}/${EV}.md`;
+  const forkMsg = "20261023T110500Z-bob-x1y2";
+
+  function proposeFake(opts: { chatJson?: object | null; pr?: object | null; push?: boolean } = {}) {
+    const meta = { schema_version: 1, chat_id: CHILD, title: "Ветка 7", created_at: "2026-10-23T11:00:00Z", created_by: "bob", parent: PARENT };
+    const chatJson = opts.chatJson === undefined ? meta : opts.chatJson;
+    return new FakeGitHub()
+      .on("GET", R, { body: repoBody(opts.push ?? true) })
+      .on("GET", `${R}/contents/chats/${CHILD}/chat.json`, chatJson ? { body: { content: b64(JSON.stringify(chatJson)) } } : NOT_FOUND)
+      .on("GET", /\/pulls\?state=all&head=Alex011082%3Achat%2F20261023-m2p9/, { body: opts.pr === undefined ? [childPr(7, PARENT)] : opts.pr ? [opts.pr] : [] })
+      .on("GET", `${R}/contents/${DDIR}`, NOT_FOUND)
+      .on("PUT", /\/contents\/chats\/20261023-k7q2\/decisions\//, { status: 201, body: { commit: { sha: "pcommit", html_url: "u" } } });
+  }
+
+  test("событие propose с from_chat пишется в ветку и папку решений родителя", async () => {
+    const fake = proposeFake();
+    const d = await proposeToParent(ctx(fake, ["p001"]), REPO, CHILD, { title: "Мост", text: "11 коробок в минуту.", source_messages: [forkMsg] });
+    const put = fake.find("PUT", putPath)[0]!.body;
+    expect(put.branch).toBe(BRANCH);
+    expect(put.message).toBe(`chat(${CHAT}): предложение из Fork ${CHILD}`);
+    expect(Buffer.from(put.content, "base64").toString("utf8")).toBe(
+      `---\nid: ${EV}\ndecision: ${EV}\naction: propose\nauthor: alex011082\ncreated_at: 2026-10-23T10:02:03Z\ntitle: Мост\nsource_messages: ${forkMsg}\nfrom_chat: ${CHILD}\n---\n11 коробок в минуту.\n`,
+    );
+    // Родитель — из chat.json Fork на его ветке; список PR не нужен.
+    expect(fake.find("GET", `${R}/contents/chats/${CHILD}/chat.json`)[0]!.url.searchParams.get("ref")).toBe(CHILD_BRANCH);
+    expect(fake.find("GET", /\/pulls\?/).length).toBe(0);
+    expect(d).toEqual({
+      id: EV, title: "Мост", status: "proposed", created_at: "2026-10-23T10:02:03.000Z", created_by: "alex011082",
+      source_messages: [forkMsg], from_chat: CHILD, text: "11 коробок в минуту.",
+      history: [{ id: EV, action: "propose", author: "alex011082", created_at: "2026-10-23T10:02:03.000Z", text: "11 коробок в минуту." }],
+    });
+  });
+
+  test("нет chat.json — родитель из тела PR", async () => {
+    const fake = proposeFake({ chatJson: null });
+    const d = await proposeToParent(ctx(fake, ["p001"]), REPO, CHILD, { title: "Мост", text: "", source_messages: [] });
+    expect(d.from_chat).toBe(CHILD);
+    expect(fake.find("PUT", putPath).length).toBe(1);
+  });
+
+  test("не Fork — 400, ничего не пишется; чата нет — 404", async () => {
+    const plain = proposeFake({ chatJson: { schema_version: 1, chat_id: CHILD, title: "Т", created_at: "2026-10-23T11:00:00Z", created_by: "bob", parent: null }, pr: chatPr({ number: 7, head: { ref: CHILD_BRANCH, sha: "x", repo: { full_name: "Alex011082/chat.0110" } }, body: `<!-- chat0110\nchat_id: ${CHILD}\n-->` }) });
+    const err = await failure(proposeToParent(ctx(plain), REPO, CHILD, { title: "Мост", text: "", source_messages: [] }));
+    expect(err.code).toBe("bad_request");
+    expect(err.message).toBe("Это не Fork — предлагать некому");
+    expect(plain.find("PUT", /./).length).toBe(0);
+    const none = proposeFake({ chatJson: null, pr: null });
+    expect((await failure(proposeToParent(ctx(none), REPO, CHILD, { title: "Мост", text: "", source_messages: [] }))).code).toBe("not_found");
+  });
+
+  test("supersedes — решение родителя, а не Fork", async () => {
+    const ok = withDecisions(proposeFake(), CHAT, [dev({ id: D1, action: "propose", title: "Старое" })]);
+    const d = await proposeToParent(ctx(ok, ["p001"]), REPO, CHILD, { title: "Мост", text: "", source_messages: [], supersedes: D1 });
+    expect(d.supersedes).toBe(D1);
+    expect(ok.find("GET", `${R}/contents/${DDIR}`)[0]!.url.searchParams.get("ref")).toBe(BRANCH);
+    const missing = proposeFake();
+    expect((await failure(proposeToParent(ctx(missing), REPO, CHILD, { title: "Мост", text: "", source_messages: [], supersedes: D1 }))).code).toBe("bad_request");
+    expect(missing.find("PUT", /./).length).toBe(0);
+  });
+
+  test("проверки до GitHub; нет права на запись — forbidden", async () => {
+    const fake = proposeFake();
+    for (const bad of [
+      { text: "", source_messages: [] },
+      { title: "x".repeat(161), text: "", source_messages: [] },
+      { title: "Мост", text: "я".repeat(20_001), source_messages: [] },
+      { title: "Мост", text: "", source_messages: ["../x"] },
+      { title: "Мост", text: "", source_messages: [], supersedes: "x" },
+    ]) {
+      expect((await failure(proposeToParent(ctx(fake), REPO, CHILD, bad as any))).code).toBe("bad_request");
+    }
+    expect(fake.calls.length).toBe(0);
+    const ro = proposeFake({ push: false });
+    expect((await failure(proposeToParent(ctx(ro), REPO, CHILD, { title: "Мост", text: "", source_messages: [] }))).code).toBe("forbidden");
+    expect(ro.find("PUT", /./).length).toBe(0);
   });
 });

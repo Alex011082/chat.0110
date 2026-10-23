@@ -1,7 +1,7 @@
 // Вебхук GitHub App. Он не источник данных, а только будильник: проверяет
 // подпись, отсекает повторы и будит через SSE тех, кто смотрит этот репо.
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { SSE_CHAT_UPDATED, SSE_REPO_UPDATED, chatIdFromBranch, type ChatUpdatedEvent } from "@chat0110/chat-protocol";
+import { SSE_CHAT_UPDATED, SSE_REPO_UPDATED, chatIdFromBranch, isChatId, type ChatUpdatedEvent } from "@chat0110/chat-protocol";
 import type { SseHub } from "./sse.ts";
 
 const json = (status: number, body: unknown) =>
@@ -21,6 +21,17 @@ export interface MappedEvent {
   data: ChatUpdatedEvent | { repo: string };
 }
 
+// «Предложить родителю» пишет в ветку родителя коммитом
+// «chat(<родитель>): предложение из Fork <id>» (apps/api/src/chats.ts).
+const PROPOSAL_RE = /^chat\([^)]*\): предложение из Fork (\S+)\s*$/;
+
+function proposalFork(message: unknown): string | null {
+  if (typeof message !== "string") return null;
+  const id = message.split("\n")[0]!.match(PROPOSAL_RE)?.[1];
+  // id уходит клиентам в событии — только настоящий id чата.
+  return id && isChatId(id) ? id : null;
+}
+
 // Одно событие GitHub может разбудить несколько экранов: Fork трогает и
 // ребёнка, и родителя, а пуш в чат меняет и ленту, и дерево чатов.
 export function mapWebhookEvent(name: string, payload: any): MappedEvent[] {
@@ -34,7 +45,11 @@ export function mapWebhookEvent(name: string, payload: any): MappedEvent[] {
     case "push": {
       // Дерево показывает сообщения из имён файлов — пуш в чат меняет и его.
       const id = chatIdFromBranch(String(payload.ref ?? ""));
-      return id ? [chat(id, null), repoUpdated] : [repoUpdated];
+      if (!id) return [repoUpdated];
+      // Предложение из Fork лежит в ветке родителя, а Fork показывает его
+      // статус в outgoing — будим и его.
+      const fork = proposalFork(payload.head_commit?.message);
+      return fork && fork !== id ? [chat(id, null), chat(fork, null), repoUpdated] : [chat(id, null), repoUpdated];
     }
     case "pull_request": {
       const head = chatIdFromBranch(String(pr?.head?.ref ?? ""));

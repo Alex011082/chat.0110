@@ -3,7 +3,9 @@
 import {
   branchForChat,
   chatIdFromBranch,
+  decisionsDir,
   isChatId,
+  isDecisionPath,
   isMessagePath,
   messagesDir,
   parsePrBody,
@@ -323,11 +325,29 @@ export class GitHubClient {
 
   // Файлы-сообщения чата на ветке чата или на конкретном коммите (ref = sha).
   async listMessageFiles(repo: RepoRef, chatId: string, ref: string = branchForChat(chatId)): Promise<MessageEntry[]> {
+    return this.listEventFiles(repo, messagesDir(chatId), (p) => isMessagePath(chatId, p), ref);
+  }
+
+  // События решений чата (Этап 5): та же папка-на-событие, что у сообщений.
+  async listDecisionFiles(repo: RepoRef, chatId: string, ref: string = branchForChat(chatId)): Promise<MessageEntry[]> {
+    return this.listEventFiles(repo, decisionsDir(chatId), (p) => isDecisionPath(chatId, p), ref);
+  }
+
+  // Решения с текстами. Блобы неизменны по sha и кешируются навсегда, поэтому
+  // повторное чтение — это один листинг (обычно 304 по ETag). limit — сколько
+  // блобов читать разом: граф уже параллелит по чатам и держит свой потолок.
+  async getDecisionFiles(repo: RepoRef, chatId: string, ref: string = branchForChat(chatId), limit = 8): Promise<FileInput[]> {
+    const entries = await this.listDecisionFiles(repo, chatId, ref);
+    return mapLimit(entries, limit, async (e) => ({ name: e.name, content: await this.getBlob(repo, e.sha) }));
+  }
+
+  // Папки ещё нет (никто не писал) или ветки нет (чат закрыт) — событий нет.
+  private async listEventFiles(repo: RepoRef, dir: string, accept: (path: string) => boolean, ref: string): Promise<MessageEntry[]> {
     try {
-      const list = await this.get<any[]>(`${repoPath(repo)}/contents/${enc(messagesDir(chatId))}?ref=${encodeURIComponent(ref)}`);
+      const list = await this.get<any[]>(`${repoPath(repo)}/contents/${enc(dir)}?ref=${encodeURIComponent(ref)}`);
       if (!Array.isArray(list)) return [];
       return list
-        .filter((e) => e.type === "file" && isMessagePath(chatId, e.path))
+        .filter((e) => e.type === "file" && accept(e.path))
         .map((e) => ({ name: e.name, path: e.path, sha: e.sha }));
     } catch (e) {
       if (e instanceof GitHubError && e.code === "not_found") return [];
@@ -522,6 +542,12 @@ export class GitHubClient {
 
   async createBranch(repo: RepoRef, branch: string, sha: string): Promise<void> {
     await this.request("POST", `${repoPath(repo)}/git/refs`, { ref: `refs/heads/${branch}`, sha });
+  }
+
+  // Без force: если ветку успели сдвинуть, GitHub ответит 422 «not a fast
+  // forward», и чужой коммит не потеряется — вызывающий перечитает голову.
+  async updateBranch(repo: RepoRef, branch: string, sha: string): Promise<void> {
+    await this.request("PATCH", `${repoPath(repo)}/git/refs/heads/${enc(branch)}`, { sha, force: false });
   }
 
   async deleteBranch(repo: RepoRef, branch: string): Promise<void> {
