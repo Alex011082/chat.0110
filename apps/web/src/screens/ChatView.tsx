@@ -1,11 +1,14 @@
 import type { MessageItem, TimelineResponse } from "@chat0110/chat-protocol";
 import { useMemo, type ReactNode } from "react";
 import { ApiFailure, errorText } from "../api.ts";
+import { lastForkable } from "../lib/fork.ts";
+import { chatRoute } from "../lib/route.ts";
 import { plural } from "../lib/text.ts";
 import { ago } from "../lib/time.ts";
 import { countTimeline, type LocalEntry } from "../lib/timeline.ts";
 import { forms, s } from "../strings.ts";
-import { Body, cx, Grille, KeyLink, Lamp, Readout, RoundKey, Screen, type LampState } from "../ui/kit.tsx";
+import { AppLink } from "../ui/AppLink.tsx";
+import { Body, cx, Grille, Key, KeyLink, Lamp, Readout, RoundKey, Screen, type LampState } from "../ui/kit.tsx";
 import { Composer } from "./Composer.tsx";
 import { Timeline } from "./Timeline.tsx";
 
@@ -43,11 +46,15 @@ interface ChatViewProps {
   onSend: (text: string, replyTo?: string) => void;
   onRetry: (localId: string) => void;
   onAccept: (n: number) => Promise<void>;
+  /** Название родителя для дочернего чата (из контекста или списка). */
+  parentTitle: string | null;
+  onFork: (m: MessageItem) => void;
 }
 
 export function ChatView(p: ChatViewProps) {
   const { chat, items } = p.data;
   const counts = useMemo(() => countTimeline(items), [items]);
+  const forkFrom = useMemo(() => lastForkable(items), [items]);
   const status = syncStatus(p.sync, p.now);
   const chatKey = `${chat.repo.toLowerCase()}/${chat.chat_id}`;
 
@@ -62,6 +69,10 @@ export function ChatView(p: ChatViewProps) {
       onReply={p.onReply}
       onRetry={p.onRetry}
       onAccept={p.onAccept}
+      forks={p.data.forks}
+      inherited={p.data.inherited}
+      parentTitle={p.parentTitle}
+      onFork={p.onFork}
     />
   );
   const composer = (
@@ -122,6 +133,13 @@ export function ChatView(p: ChatViewProps) {
           </div>
           <div className="flex items-center gap-[18px]">
             <Grille width={86} height={36} className="hidden desk:block" />
+            <Key
+              onClick={() => forkFrom && p.onFork(forkFrom)}
+              disabled={!forkFrom}
+              title={forkFrom ? s.header.forkHint : s.header.forkNoMessages}
+            >
+              {s.header.fork}
+            </Key>
             <KeyLink href={chat.url} target="_blank" rel="noopener noreferrer">
               {s.header.openInGitHub}
             </KeyLink>
@@ -130,7 +148,26 @@ export function ChatView(p: ChatViewProps) {
             ) : null}
           </div>
         </div>
-        <Screen className="grid grid-cols-3 gap-3.5 px-[18px] py-3.5">
+        <Screen
+          className={cx(
+            "grid gap-3.5 px-[18px] py-3.5",
+            chat.parent ? "grid-cols-2 desk:grid-cols-[minmax(0,1.1fr)_minmax(0,1.3fr)_minmax(0,0.9fr)_minmax(0,1fr)]" : "grid-cols-3",
+          )}
+        >
+          {chat.parent ? (
+            <Readout
+              label={s.header.parent}
+              value={
+                <AppLink
+                  to={chatRoute(chat.repo, chat.parent.chat_id)}
+                  hash={chat.parent.message_id}
+                  className="no-underline [overflow-wrap:anywhere]"
+                >
+                  {p.parentTitle ?? chat.parent.chat_id}
+                </AppLink>
+              }
+            />
+          ) : null}
           <Readout label={s.header.branch} value={chat.branch} />
           <Readout label={s.header.pullRequest} value={s.header.prValue(chat.number, chat.draft, chat.state === "closed")} />
           <Readout

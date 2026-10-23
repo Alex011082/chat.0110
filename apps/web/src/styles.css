@@ -396,3 +396,34 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Дерево разговоров: узел — ссылка SVG. Наведение — тихое кольцо, фокус с
+   клавиатуры — оранжевое, как везде. Блик на ручке-начале — как --hi. */
+.tree-node {
+  cursor: pointer;
+  outline: none;
+}
+.tree-node .tree-ring {
+  stroke: transparent;
+}
+.tree-node:hover .tree-ring {
+  stroke: var(--ink-3);
+}
+.tree-node:focus-visible .tree-ring {
+  stroke: var(--lamp);
+}
+.tree-hi {
+  stroke: rgba(255, 255, 255, 0.75);
+}
+.tree-cap {
+  stroke: var(--line);
+}
+@media (prefers-color-scheme: dark) {
+  .tree-hi {
+    stroke: rgba(255, 255, 255, 0.09);
+  }
+  /* Тёмная ручка на тёмной плите: тонкий светлый обод, иначе её не видно. */
+  .tree-cap {
+    stroke: rgba(236, 238, 234, 0.24);
+  }
+}

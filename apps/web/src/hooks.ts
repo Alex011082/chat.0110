@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { mockRequested } from "./api.ts";
-import { parseRoute, routePath, type Route } from "./lib/route.ts";
+import { parseRoute, routePath, routeSearch, type Route } from "./lib/route.ts";
 
 // --- Адрес (History API) ---------------------------------------------------------
 
@@ -15,22 +15,33 @@ function subscribeRoute(cb: () => void): () => void {
   };
 }
 
-const getPath = () => location.pathname;
+// Снимок — строка: useSyncExternalStore сравнивает его по значению.
+const getLocation = () => location.pathname + location.search;
 
 export function useRoute(): Route {
-  const path = useSyncExternalStore(subscribeRoute, getPath, getPath);
-  return useMemo(() => parseRoute(path), [path]);
+  const loc = useSyncExternalStore(subscribeRoute, getLocation, getLocation);
+  return useMemo(() => {
+    const q = loc.indexOf("?");
+    return q < 0 ? parseRoute(loc) : parseRoute(loc.slice(0, q), loc.slice(q));
+  }, [loc]);
 }
 
-/** Переход внутри приложения. Пробный режим (?mock) сохраняется в адресе. */
+/** Адрес для href: тот же, что положит navigate. Пробный режим (?mock) сохраняется. */
+export function routeHref(route: Route, hash?: string): string {
+  const mock = import.meta.env.DEV ? mockRequested() : null;
+  return routePath(route) + routeSearch(route, mock) + (hash ? `#${hash}` : "");
+}
+
+/** Переход внутри приложения. */
 export function navigate(route: Route, opts: { replace?: boolean; hash?: string } = {}): void {
-  const mock = mockRequested();
-  const search = mock && import.meta.env.DEV ? `?mock=${encodeURIComponent(mock)}` : "";
-  const url = routePath(route) + search + (opts.hash ? `#${opts.hash}` : "");
+  const url = routeHref(route, opts.hash);
   if (url === location.pathname + location.search + location.hash) return;
+  const samePage = routeHref(route) === location.pathname + location.search;
   if (opts.replace) history.replaceState(null, "", url);
   else history.pushState(null, "", url);
   window.dispatchEvent(new Event(ROUTE_EVENT));
+  // pushState не будит hashchange: лента того же чата должна подсветить сообщение.
+  if (samePage && opts.hash) window.dispatchEvent(new HashChangeEvent("hashchange"));
 }
 
 // --- Ширина экрана ------------------------------------------------------------------

@@ -2,7 +2,10 @@ import { s } from "../strings.ts";
 import { cx, Knob, Mark, TextButton } from "../ui/kit.tsx";
 
 interface RailProps {
+  /** Какой раздел открыт: ручка текущего — чёрная. */
+  view: "chats" | "tree";
   onChats: () => void;
+  onTree: () => void;
   onNew: () => void;
   onLogout: () => void;
   canCreate: boolean;
@@ -11,12 +14,12 @@ interface RailProps {
 }
 
 /** Алюминиевый рельс с ручками разделов. */
-export function Rail({ onChats, onNew, onLogout, canCreate, bottom }: RailProps) {
+export function Rail({ view, onChats, onTree, onNew, onLogout, canCreate, bottom }: RailProps) {
   const knobs = (
     <>
-      <Knob label={s.rail.chats} current onClick={onChats} />
+      <Knob label={s.rail.chats} current={view === "chats"} onClick={onChats} />
       <Knob label={s.rail.newChat} onClick={onNew} disabled={!canCreate} />
-      <Knob label={s.rail.tree} disabled title={s.rail.soon} />
+      <Knob label={s.rail.tree} current={view === "tree"} onClick={onTree} />
     </>
   );
   if (bottom) {

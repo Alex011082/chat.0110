@@ -1,7 +1,7 @@
 /// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
 import type { ChatSummary } from "@chat0110/chat-protocol";
-import { agentLinkPhrase, arrangeChats, backoffDelay, eventMatchesChat } from "../src/lib/chat.ts";
+import { agentLinkPhrase, arrangeChats, arrangeChatTree, backoffDelay, eventMatchesChat, type ChatTreeNode } from "../src/lib/chat.ts";
 
 function chat(over: Partial<ChatSummary>): ChatSummary {
   return {
@@ -16,6 +16,7 @@ function chat(over: Partial<ChatSummary>): ChatSummary {
     created_at: "2026-10-23T10:00:00Z",
     updated_at: "2026-10-23T10:00:00Z",
     created_by: "alex011082",
+    parent: null,
     ...over,
   };
 }
@@ -78,5 +79,88 @@ describe("eventMatchesChat — какое событие будит открыт
 describe("backoffDelay — переподключение SSE", () => {
   test("удваивается и упирается в минуту", () => {
     expect([0, 1, 2, 5, 6, 10].map(backoffDelay)).toEqual([1000, 2000, 4000, 32000, 60000, 60000]);
+  });
+});
+
+describe("arrangeChatTree — Fork под родителем (доступная замена дерева)", () => {
+  const fork = (parent: string) => ({ chat_id: parent, message_id: "c1", commit_sha: "a3f8c91" });
+  const flat = (nodes: ChatTreeNode[]): Array<[string, number]> =>
+    nodes.flatMap((n) => [[n.chat.chat_id, n.depth] as [string, number], ...flat(n.children)]);
+
+  test("без Fork — как обычный список", () => {
+    const list = [
+      chat({ chat_id: "20261023-aaaa", updated_at: "2026-10-23T10:00:00Z" }),
+      chat({ chat_id: "20261023-bbbb", updated_at: "2026-10-23T11:00:00Z" }),
+      chat({ chat_id: "20261023-cccc", state: "closed" }),
+    ];
+    const t = arrangeChatTree(list, "");
+    expect(flat(t.open)).toEqual([["20261023-bbbb", 0], ["20261023-aaaa", 0]]);
+    expect(flat(t.archived)).toEqual([["20261023-cccc", 0]]);
+  });
+
+  test("дети с отступом под родителем, внуки глубже; открытые первыми, свежие выше", () => {
+    const list = [
+      chat({ chat_id: "20261023-root", title: "RoboChain", updated_at: "2026-10-23T09:00:00Z" }),
+      chat({ chat_id: "20261023-old1", parent: fork("20261023-root"), updated_at: "2026-10-23T10:00:00Z" }),
+      chat({ chat_id: "20261023-new1", parent: fork("20261023-root"), updated_at: "2026-10-23T12:00:00Z" }),
+      chat({ chat_id: "20261023-shut", parent: fork("20261023-root"), state: "closed", updated_at: "2026-10-23T13:00:00Z" }),
+      chat({ chat_id: "20261023-gran", parent: fork("20261023-old1"), updated_at: "2026-10-23T10:30:00Z" }),
+      chat({ chat_id: "20261023-solo", updated_at: "2026-10-23T11:00:00Z" }),
+    ];
+    const t = arrangeChatTree(list, "");
+    expect(flat(t.open)).toEqual([
+      ["20261023-solo", 0],
+      ["20261023-root", 0],
+      ["20261023-new1", 1],
+      ["20261023-old1", 1],
+      ["20261023-gran", 2],
+      ["20261023-shut", 1],
+    ]);
+    expect(t.archived).toEqual([]);
+    const child = t.open[1]!.children[0]!;
+    expect(child.parentTitle).toBe("RoboChain");
+  });
+
+  test("закрытый родитель с открытым ребёнком остаётся среди открытых; всё закрытое — в архив деревом", () => {
+    const list = [
+      chat({ chat_id: "20261023-root", state: "closed" }),
+      chat({ chat_id: "20261023-kid1", parent: fork("20261023-root") }),
+      chat({ chat_id: "20261023-arch", state: "closed" }),
+      chat({ chat_id: "20261023-kid2", state: "closed", parent: fork("20261023-arch") }),
+    ];
+    const t = arrangeChatTree(list, "");
+    expect(flat(t.open)).toEqual([["20261023-root", 0], ["20261023-kid1", 1]]);
+    expect(flat(t.archived)).toEqual([["20261023-arch", 0], ["20261023-kid2", 1]]);
+  });
+
+  test("не глубже четырёх уровней: дальше — тем же отступом следом", () => {
+    const ids = ["20261023-lv00", "20261023-lv01", "20261023-lv02", "20261023-lv03", "20261023-lv04", "20261023-lv05"];
+    const list = ids.map((id, i) => chat({ chat_id: id, parent: i ? fork(ids[i - 1]!) : null }));
+    const t = arrangeChatTree(list, "");
+    expect(flat(t.open)).toEqual([
+      ["20261023-lv00", 0],
+      ["20261023-lv01", 1],
+      ["20261023-lv02", 2],
+      ["20261023-lv03", 3],
+      ["20261023-lv04", 3],
+      ["20261023-lv05", 3],
+    ]);
+  });
+
+  test("сирота — корень", () => {
+    const t = arrangeChatTree([chat({ chat_id: "20261023-orph", parent: fork("20261001-gone") })], "");
+    expect(flat(t.open)).toEqual([["20261023-orph", 0]]);
+    expect(t.open[0]!.parentTitle).toBeNull();
+  });
+
+  test("поиск — плоско, находит и детей", () => {
+    const list = [
+      chat({ chat_id: "20261023-root", title: "RoboChain" }),
+      chat({ chat_id: "20261023-kid1", title: "Мост для RoboChain", parent: fork("20261023-root"), updated_at: "2026-10-23T12:00:00Z" }),
+      chat({ chat_id: "20261023-othr", title: "Другое" }),
+    ];
+    const t = arrangeChatTree(list, "robo");
+    expect(flat(t.open)).toEqual([["20261023-kid1", 0], ["20261023-root", 0]]);
+    expect(t.open[0]!.parentTitle).toBe("RoboChain");
   });
 });
