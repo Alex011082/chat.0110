@@ -21,6 +21,40 @@ Fork — точка возвращения. Подробно — [спека](do
 Хранилище — только GitHub. Формат — [`docs/protocol.md`](docs/protocol.md).
 Визуальный язык — [`docs/design.md`](docs/design.md).
 
+## Разработка
+
+```bash
+bun install
+bun test && bun run typecheck && bun run build
+bun run dev:api   # сервер на http://localhost:4340 (нужны переменные из deploy/configure.sh)
+bun run dev:web   # интерфейс на Vite, /api и /auth проксируются на :4340
+```
+
+## Запуск на chat.0110.digital (сервер Jarvis)
+
+Один раз, руками (это делает владелец):
+
+1. **DNS.** В GoDaddy — A-запись `chat.0110.digital` → IP сервера Jarvis.
+2. **GitHub App** (github.com → Settings → Developer settings → GitHub Apps → New):
+   - Homepage URL: `https://chat.0110.digital`
+   - Callback URL: `https://chat.0110.digital/auth/callback` и вторым —
+     `http://localhost:4340/auth/callback` (для разработки)
+   - Включить **Expire user authorization tokens** и
+     **Request user authorization (OAuth) during installation**
+   - Webhook: Active, URL `https://chat.0110.digital/api/github/webhook`,
+     секрет — тот, что выдаст `configure.sh` (шаг 4; до этого — любой временный)
+   - Repository permissions: **Contents** — Read and write, **Pull requests** —
+     Read and write, **Issues** — Read and write, **Metadata** — Read
+   - Subscribe to events: **Push, Pull request, Issue comment, Pull request review,
+     Pull request review comment**
+   - Where can this GitHub App be installed: **Any account**
+   - После создания: Generate a new client secret; Install App → на `chat.0110`
+3. `bash deploy/setup.sh` — каталоги, systemd-unit и сайт Caddy на сервере.
+4. `bash deploy/configure.sh` — ввести Client ID, Client secret и slug приложения.
+   Скрипт покажет секрет вебхука — вставить его в настройки App.
+5. `bash deploy/deploy.sh` — выкат закоммиченного состояния; повторять при каждом
+   обновлении.
+
 ## Статус
 
 Этап 1 «GitHub Core» в работе: чаты, сообщения, вход через GitHub App,
