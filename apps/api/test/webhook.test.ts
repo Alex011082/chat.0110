@@ -63,14 +63,28 @@ describe("вебхук GitHub App", () => {
     const again = await wh(hook("push", payload, { delivery: "d1" }));
     expect(again.status).toBe(200);
     expect(await again.json()).toMatchObject({ duplicate: true });
-    expect(got.length).toBe(1);
+    expect(got.length).toBe(2);
   });
 
-  test("пуш в ветку чата будит подписчиков репо", async () => {
+  test("пуш в ветку чата будит подписчиков репо: чат и дерево", async () => {
     const { hub, got } = spyHub();
     const wh = createWebhook({ secret: SECRET, hub });
     await wh(hook("push", { ref: "refs/heads/chat/20261023-k7q2", repository: REPO }));
-    expect(got).toEqual([{ repo: "Alex011082/chat.0110", event: SSE_CHAT_UPDATED, data: { repo: "Alex011082/chat.0110", chat_id: "20261023-k7q2", number: null } }]);
+    expect(got).toEqual([
+      { repo: "Alex011082/chat.0110", event: SSE_CHAT_UPDATED, data: { repo: "Alex011082/chat.0110", chat_id: "20261023-k7q2", number: null } },
+      { repo: "Alex011082/chat.0110", event: SSE_REPO_UPDATED, data: { repo: "Alex011082/chat.0110" } },
+    ]);
+  });
+
+  test("PR дочернего чата будит и ребёнка, и родителя, и дерево", async () => {
+    const { hub, got } = spyHub();
+    const wh = createWebhook({ secret: SECRET, hub });
+    await wh(hook("pull_request", { action: "opened", repository: REPO, pull_request: { number: 7, head: { ref: "chat/20261024-m2p9" }, base: { ref: "chat/20261023-k7q2" } } }));
+    expect(got.map((g) => [g.event, g.data])).toEqual([
+      [SSE_CHAT_UPDATED, { repo: REPO.full_name, chat_id: "20261024-m2p9", number: 7 }],
+      [SSE_CHAT_UPDATED, { repo: REPO.full_name, chat_id: "20261023-k7q2", number: null }],
+      [SSE_REPO_UPDATED, { repo: REPO.full_name }],
+    ]);
   });
 });
 
@@ -79,32 +93,44 @@ describe("события вебхука → SSE", () => {
   const chat = (chat_id: string | null, number: number | null) => ({ event: SSE_CHAT_UPDATED, data: { repo: REPO.full_name, chat_id, number } });
   const repoUpdated = { event: SSE_REPO_UPDATED, data: { repo: REPO.full_name } };
 
-  test("push", () => {
-    expect(ev("push", { ref: "refs/heads/chat/20261023-k7q2" })).toEqual(chat("20261023-k7q2", null));
-    expect(ev("push", { ref: "refs/heads/main" })).toEqual(repoUpdated);
+  test("push: в ветку чата — чат и дерево; в другую ветку — только репо", () => {
+    expect(ev("push", { ref: "refs/heads/chat/20261023-k7q2" })).toEqual([chat("20261023-k7q2", null), repoUpdated]);
+    expect(ev("push", { ref: "refs/heads/main" })).toEqual([repoUpdated]);
   });
 
   test("pull_request: ветка чата в head или base", () => {
-    expect(ev("pull_request", { pull_request: { number: 5, head: { ref: "chat/20261023-k7q2" }, base: { ref: "main" } } })).toEqual(chat("20261023-k7q2", 5));
-    expect(ev("pull_request", { pull_request: { number: 9, head: { ref: "claude/reply" }, base: { ref: "chat/20261023-k7q2" } } })).toEqual(chat("20261023-k7q2", 9));
-    expect(ev("pull_request", { pull_request: { number: 3, head: { ref: "feature/x" }, base: { ref: "main" } } })).toEqual(repoUpdated);
+    expect(ev("pull_request", { pull_request: { number: 5, head: { ref: "chat/20261023-k7q2" }, base: { ref: "main" } } })).toEqual([chat("20261023-k7q2", 5)]);
+    expect(ev("pull_request", { pull_request: { number: 9, head: { ref: "claude/reply" }, base: { ref: "chat/20261023-k7q2" } } })).toEqual([chat("20261023-k7q2", 9)]);
+    expect(ev("pull_request", { pull_request: { number: 3, head: { ref: "feature/x" }, base: { ref: "main" } } })).toEqual([repoUpdated]);
+  });
+
+  test("pull_request дочернего чата: ребёнок, родитель (без чужого номера) и дерево", () => {
+    expect(ev("pull_request", { pull_request: { number: 7, head: { ref: "chat/20261024-m2p9" }, base: { ref: "chat/20261023-k7q2" } } })).toEqual([
+      chat("20261024-m2p9", 7),
+      chat("20261023-k7q2", null),
+      repoUpdated,
+    ]);
+    // Агент из форка в ветке с тем же именем: это PR в чат, а не Fork.
+    expect(ev("pull_request", { pull_request: { number: 10, head: { ref: "chat/20261023-k7q2" }, base: { ref: "chat/20261023-k7q2" } } })).toEqual([
+      chat("20261023-k7q2", 10),
+    ]);
   });
 
   test("комментарий к PR — chat_id неизвестен, есть номер", () => {
-    expect(ev("issue_comment", { issue: { number: 5, pull_request: {} } })).toEqual(chat(null, 5));
-    expect(ev("issue_comment", { issue: { number: 6 } })).toEqual(repoUpdated);
+    expect(ev("issue_comment", { issue: { number: 5, pull_request: {} } })).toEqual([chat(null, 5)]);
+    expect(ev("issue_comment", { issue: { number: 6 } })).toEqual([repoUpdated]);
   });
 
   test("ревью и комментарии к строкам", () => {
     const pr = { number: 5, head: { ref: "chat/20261023-k7q2" }, base: { ref: "main" } };
-    expect(ev("pull_request_review", { pull_request: pr })).toEqual(chat("20261023-k7q2", 5));
-    expect(ev("pull_request_review_comment", { pull_request: pr })).toEqual(chat("20261023-k7q2", 5));
-    expect(ev("pull_request_review", { pull_request: { number: 8, head: { ref: "x" }, base: { ref: "main" } } })).toEqual(chat(null, 8));
+    expect(ev("pull_request_review", { pull_request: pr })).toEqual([chat("20261023-k7q2", 5)]);
+    expect(ev("pull_request_review_comment", { pull_request: pr })).toEqual([chat("20261023-k7q2", 5)]);
+    expect(ev("pull_request_review", { pull_request: { number: 8, head: { ref: "x" }, base: { ref: "main" } } })).toEqual([chat(null, 8)]);
   });
 
   test("прочее — repo.updated; без репо — ничего", () => {
-    expect(ev("create", {})).toEqual(repoUpdated);
-    expect(mapWebhookEvent("installation", { action: "created" })).toBeNull();
+    expect(ev("create", {})).toEqual([repoUpdated]);
+    expect(mapWebhookEvent("installation", { action: "created" })).toEqual([]);
   });
 });
 

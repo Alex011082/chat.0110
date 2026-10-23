@@ -57,6 +57,21 @@ describe("запросы к GitHub", () => {
     ]);
   });
 
+  test("репо — сначала самые активные (pushed_at), пустые в конце", async () => {
+    const repo = (full_name: string, pushed_at: string | null) => ({
+      full_name, name: full_name.split("/")[1], owner: { login: full_name.split("/")[0] }, private: false, default_branch: "main", permissions: { push: true }, pushed_at,
+    });
+    const fake = new FakeGitHub()
+      .on("GET", "/user/installations?per_page=100", { body: { installations: [{ id: 11 }, { id: 12 }] } })
+      .on("GET", "/user/installations/11/repositories?per_page=100", {
+        body: { repositories: [repo("a/old", "2026-01-01T00:00:00Z"), repo("a/empty", null), repo("a/live", "2026-10-23T09:00:00Z")] },
+      })
+      .on("GET", "/user/installations/12/repositories?per_page=100", { body: { repositories: [repo("b/mid", "2026-06-01T00:00:00Z")] } });
+    const repos = await client(fake).listRepos();
+    expect(repos.map((r) => r.full_name)).toEqual(["a/live", "b/mid", "a/old", "a/empty"]);
+    expect(Object.keys(repos[0]!)).not.toContain("pushed_at");
+  });
+
   test("ETag: повторный запрос шлёт If-None-Match и берёт тело из кеша на 304", async () => {
     let n = 0;
     const fake = new FakeGitHub().on("GET", "/user", (call) => {

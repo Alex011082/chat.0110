@@ -3,7 +3,7 @@
 // как попадёт в URL GitHub.
 import { isChatId, type AppConfig, type CreateChatResponse, type Me, type PostMessageResponse } from "@chat0110/chat-protocol";
 import { createAuth } from "./auth.ts";
-import { acceptAgentPr, createChat, getTimeline, listChats, postMessage, type ChatCtx } from "./chats.ts";
+import { acceptAgentPr, createChat, forkChat, getGraph, getTimeline, listChats, postMessage, type ChatCtx } from "./chats.ts";
 import { isLoginAllowed, type Config } from "./config.ts";
 import { HttpError, badRequest, forbidden, notFound, unauthorized } from "./errors.ts";
 import { GitHubClient, createCaches, type Fetch, type GitHubCaches, type RepoRef } from "./github.ts";
@@ -145,6 +145,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
         const out: CreateChatResponse = { chat: await createChat(ctx, repo, { title: body.title, first_message: body.first_message }) };
         return json(201, out);
       }
+      if (path === "/api/graph" && method === "GET") return json(200, await getGraph(gh, repoFromParam(url.searchParams.get("repo"))));
       if (path === "/api/events" && method === "GET") {
         const repo = repoFromParam(url.searchParams.get("repo"));
         // Доступ проверяем ДО подписки: иначе любой вошедший мог бы слушать,
@@ -171,6 +172,13 @@ export async function createApp(deps: AppDeps): Promise<App> {
         if (method === "POST" && rest.length === 1 && rest[0] === "messages") {
           const body = await readJson(req);
           const out: PostMessageResponse = { item: await postMessage(ctx, repo, chatId, { text: body.text, reply_to: body.reply_to }) };
+          return json(201, out);
+        }
+        if (method === "POST" && rest.length === 1 && rest[0] === "fork") {
+          const body = await readJson(req);
+          const out: CreateChatResponse = {
+            chat: await forkChat(ctx, repo, chatId, { message_id: body.message_id, title: body.title, reason: body.reason, first_message: body.first_message }),
+          };
           return json(201, out);
         }
         if (method === "POST" && rest.length === 3 && rest[0] === "agent-prs" && rest[2] === "accept") {
