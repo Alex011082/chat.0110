@@ -5,6 +5,11 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { SCAFFOLD, planInit, scaffoldViolation } from "@chat0110/chat-protocol";
 
+if (process.argv[2] === "migrate") {
+  await import("./migrate.ts");
+  process.exit(0);
+}
+
 const args = process.argv.slice(2).filter((a) => a !== "init");
 const dirFlag = args.indexOf("--dir");
 const root = dirFlag >= 0 && args[dirFlag + 1] ? args[dirFlag + 1]! : process.cwd();

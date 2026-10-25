@@ -35,6 +35,25 @@ export interface ChatActivation {
   created?: string[];
 }
 
+export type ChatMigrationStatus = "pending" | "migrated" | "conflict" | "protocol_invalid" | "missing_branch";
+
+/** Один старый чат. created — пути, которые дописал этот вызов, не GET. */
+export interface ChatMigrationItem {
+  chat_id: string;
+  number: number;
+  url: string;
+  status: ChatMigrationStatus;
+  created: string[];
+  conflicts: string[];
+}
+
+/** Перенос chats/<id>/ → Chat/conversations/<id>/ на тех же ветках. */
+export interface ChatMigration {
+  repo: string;
+  can_push: boolean;
+  items: ChatMigrationItem[];
+}
+
 export interface RepoInfo {
   full_name: string;
   owner: string;

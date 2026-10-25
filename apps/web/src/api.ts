@@ -6,6 +6,7 @@ import {
   type ApiErrorCode,
   type AppConfig,
   type ChatActivation,
+  type ChatMigration,
   type ChatSummary,
   type ChatUpdatedEvent,
   type CreateChatRequest,
@@ -68,6 +69,8 @@ export interface Api {
   repos(): Promise<RepoInfo[]>;
   activation(repo: string): Promise<ChatActivation>;
   activate(repo: string): Promise<ChatActivation>;
+  migration(repo: string): Promise<ChatMigration>;
+  migrate(repo: string): Promise<ChatMigration>;
   chats(repo: string): Promise<ChatSummary[]>;
   timeline(repo: string, chatId: string): Promise<TimelineResponse>;
   createChat(req: CreateChatRequest): Promise<CreateChatResponse>;
@@ -188,6 +191,8 @@ export const httpApi: Api = {
   repos: async () => listOf<RepoInfo>(await request("GET", "/api/repos"), "repos"),
   activation: (repo) => request<ChatActivation>("GET", `/api/activation?repo=${encodeURIComponent(repo)}`),
   activate: (repo) => request<ChatActivation>("POST", "/api/activation", { repo }),
+  migration: (repo) => request<ChatMigration>("GET", `/api/migration?repo=${encodeURIComponent(repo)}`),
+  migrate: (repo) => request<ChatMigration>("POST", "/api/migration", { repo }),
   chats: async (repo) => listOf<ChatSummary>(await request("GET", `/api/chats?repo=${encodeURIComponent(repo)}`), "chats"),
   timeline: (repo, chatId) => request<TimelineResponse>("GET", chatPath(repo, chatId)),
   createChat: (req) => request<CreateChatResponse>("POST", "/api/chats", req),

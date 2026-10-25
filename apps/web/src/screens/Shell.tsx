@@ -1,4 +1,4 @@
-import type { AppConfig, ChatActivation, ChatSummary, Decision, GraphResponse, Me, MessageItem, RepoInfo, TimelineResponse } from "@chat0110/chat-protocol";
+import type { AppConfig, ChatActivation, ChatMigration, ChatSummary, Decision, GraphResponse, Me, MessageItem, RepoInfo, TimelineResponse } from "@chat0110/chat-protocol";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, ApiFailure, errorText } from "../api.ts";
 import { navigate, storageGet, storageSet, useLayout, useNow, useRoute } from "../hooks.ts";
@@ -58,6 +58,8 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
   const [repos, setRepos] = useState<RepoInfo[] | null>(null);
   const [activation, setActivation] = useState<ChatActivation | null>(null);
   const [activating, setActivating] = useState(false);
+  const [migration, setMigration] = useState<ChatMigration | null>(null);
+  const [migrating, setMigrating] = useState(false);
   const [reposError, setReposError] = useState<string | null>(null);
   const [chats, setChats] = useState<ChatSummary[] | null>(null);
   const [chatsError, setChatsError] = useState<string | null>(null);
@@ -366,6 +368,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
     if (!repoFull) return;
     let cancel = false;
     setActivation(null);
+    setMigration(null);
     void api()
       .activation(repoFull)
       .then((next) => {
@@ -373,6 +376,14 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       })
       .catch(() => {
         if (!cancel) setActivation(null);
+      });
+    void api()
+      .migration(repoFull)
+      .then((next) => {
+        if (!cancel) setMigration(next);
+      })
+      .catch(() => {
+        if (!cancel) setMigration(null);
       });
     return () => {
       cancel = true;
@@ -389,6 +400,19 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       setToast(errorText(e));
     } finally {
       setActivating(false);
+    }
+  }, [repoFull]);
+
+  const migrateRepo = useCallback(async () => {
+    if (!repoFull) return;
+    setMigrating(true);
+    try {
+      setMigration(await api().migrate(repoFull));
+      setToast(s.migrate.toast);
+    } catch (e) {
+      setToast(errorText(e));
+    } finally {
+      setMigrating(false);
     }
   }, [repoFull]);
 
@@ -422,6 +446,9 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       activation={activation}
       activating={activating}
       onActivate={() => void connectRepo()}
+      migration={migration}
+      migrating={migrating}
+      onMigrate={() => void migrateRepo()}
       installUrl={installUrl}
       now={now}
       phone={phone}

@@ -1,8 +1,9 @@
 // Роутер на голом Bun.serve: маршрутов мало, и рукописная таблица проще
 // фреймворка. Каждый параметр из адреса проверяется регуляркой ДО того,
 // как попадёт в URL GitHub.
-import { isChatId, type AppConfig, type ChatActivation, type CreateChatResponse, type DecisionResponse, type Me, type PostMessageResponse } from "@chat0110/chat-protocol";
+import { isChatId, type AppConfig, type ChatActivation, type ChatMigration, type CreateChatResponse, type DecisionResponse, type Me, type PostMessageResponse } from "@chat0110/chat-protocol";
 import { activateChat, activationStatus } from "./activate.ts";
+import { migrateChats, migrationStatus } from "./migrate.ts";
 import { createAuth } from "./auth.ts";
 import {
   acceptAgentPr,
@@ -157,6 +158,14 @@ export async function createApp(deps: AppDeps): Promise<App> {
       if (path === "/api/activation" && method === "POST") {
         const body = await readJson(req);
         const out: ChatActivation = await activateChat(gh, repoFromParam(body.repo ?? url.searchParams.get("repo")));
+        return json(200, out);
+      }
+      if (path === "/api/migration" && method === "GET") {
+        return json(200, await migrationStatus(gh, repoFromParam(url.searchParams.get("repo"))));
+      }
+      if (path === "/api/migration" && method === "POST") {
+        const body = await readJson(req);
+        const out: ChatMigration = await migrateChats(gh, repoFromParam(body.repo ?? url.searchParams.get("repo")));
         return json(200, out);
       }
       if (path === "/api/chats" && method === "GET") return json(200, await listChats(gh, repoFromParam(url.searchParams.get("repo"))));
