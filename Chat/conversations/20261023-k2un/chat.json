@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "chat_id": "20261023-k2un",
+  "title": "Fork: Тестовый чат: как агенты отвечают",
+  "created_at": "2026-10-23T04:54:19Z",
+  "created_by": "alex011082",
+  "parent": {
+    "chat_id": "20261023-test",
+    "message_id": "20261023T032640Z-alex011082-vuk8",
+    "commit_sha": "47d45c3bfc6a51b347ba80a721fbab9596ba7666",
+    "reason": "проверить как работает форк"
+  }
+}
