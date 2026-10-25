@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { SCAFFOLD, chatIdFromBranch, migrateDest, planMigrate, type MigrateFile } from "@chat0110/chat-protocol";
+import { githubRepo } from "./remote.ts";
 
 const args = process.argv.slice(2).filter((a) => a !== "migrate");
 const dirFlag = args.indexOf("--dir");
@@ -40,8 +41,9 @@ console.log(`чат: ${chatId}`);
 
 const remote = git(["remote", "get-url", "origin"]);
 console.log(`remote: ${remote.ok ? remote.out : "нет"}`);
-if (remote.ok && /github\.com[:/]([^/]+)\/([^/.]+)/.test(remote.out)) {
-  const [, owner, name] = remote.out.match(/github\.com[:/]([^/]+)\/([^/.]+)/)!;
+const repo = remote.ok ? githubRepo(remote.out) : null;
+if (repo) {
+  const { owner, name } = repo;
   const probe = spawnSync("gh", ["api", `repos/${owner}/${name}`, "--jq", ".permissions.push"], { encoding: "utf8" });
   if (probe.status !== 0) fail(`Не удалось проверить право записи в ${owner}/${name}. ${probe.stderr ?? ""}`.trim());
   if (probe.stdout.trim() !== "true") fail(`Нет права записи в ${owner}/${name}. Файлы не изменены.`);
