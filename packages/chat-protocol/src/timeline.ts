@@ -1,6 +1,6 @@
 import { displayName, isAgent, resolveAuthor } from "./agents.ts";
 import { foldDecisions, parseDecisionFile, type Decision, type DecisionAction, type DecisionEvent } from "./decision.ts";
-import { chatJsonPath, isDecisionPath, isMessagePath } from "./ids.ts";
+import { isChatJsonPath, isDecisionPath, isMessagePath } from "./ids.ts";
 import { parseMessageFile, validIso, type MessageFile } from "./message-file.ts";
 import { parseCommentMeta } from "./meta.ts";
 
@@ -202,7 +202,7 @@ export function buildTimeline(input: TimelineInput): TimelineItem[] {
 
   for (const c of input.commits) {
     const actor = actorOf(c);
-    if (c.added.includes(chatJsonPath(chatId))) {
+    if (c.added.some((p) => isChatJsonPath(chatId, p))) {
       items.push({ kind: "created", id: c.sha, actor, created_at: iso(c.date), url: c.url });
     } else if (!c.added.some((p) => isMessagePath(chatId, p) || isDecisionPath(chatId, p))) {
       const author = commitAuthor(c, chatId);

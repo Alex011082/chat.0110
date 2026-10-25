@@ -56,7 +56,7 @@ export interface TimelineProps {
   /** Предложения этого Fork родителю. */
   outgoing: Decision[];
   /** «Решение» у сообщения — форма нового решения. */
-  onDecide: (m: MessageItem) => void;
+  onDecide: ((m: MessageItem) => void) | null;
   onDecision: DecisionHandler;
 }
 
@@ -473,8 +473,8 @@ function Message({ m, first, published, ctx }: { m: MessageItem; first: boolean;
             {copied ? s.copied : s.timeline.link}
           </TextButton>
           {canForkFrom(m) ? <TextButton onClick={() => ctx.onFork(m)}>{s.timeline.fork}</TextButton> : null}
-          {!m.pending && ctx.chat.can_push ? (
-            <TextButton onClick={() => ctx.onDecide(m)}>{s.timeline.decide}</TextButton>
+          {!m.pending && ctx.chat.can_push && ctx.onDecide ? (
+            <TextButton onClick={() => ctx.onDecide?.(m)}>{s.timeline.decide}</TextButton>
           ) : null}
         </div>
         {forks ? <ForkChips forks={forks} repo={ctx.chat.repo} label={s.timeline.forksLabel} /> : null}

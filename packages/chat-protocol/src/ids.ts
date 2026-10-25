@@ -61,34 +61,48 @@ export function parseMessageId(id: string): MessageIdParts | null {
   return { stamp, author, rand, date: date.toISOString() };
 }
 
-export function messagesDir(chatId: string): string {
-  return `chats/${chatId}/messages`;
+/** 1 — прежний каталог chats/. 2 — Chat/conversations/ после подключения репозитория. */
+export type ChatStore = 1 | 2;
+
+function chatHome(chatId: string, store: ChatStore): string {
+  return store === 2 ? `Chat/conversations/${chatId}` : `chats/${chatId}`;
 }
 
-export function messagePath(chatId: string, messageId: string): string {
-  return `${messagesDir(chatId)}/${messageId}.md`;
+export function messagesDir(chatId: string, store: ChatStore = 1): string {
+  return `${chatHome(chatId, store)}/messages`;
 }
 
-export function chatJsonPath(chatId: string): string {
-  return `chats/${chatId}/chat.json`;
+export function messagePath(chatId: string, messageId: string, store: ChatStore = 1): string {
+  return `${messagesDir(chatId, store)}/${messageId}.md`;
 }
 
-export function isMessagePath(chatId: string, path: string): boolean {
-  return isEventPath(messagesDir(chatId), path);
+export function chatJsonPath(chatId: string, store: ChatStore = 1): string {
+  return `${chatHome(chatId, store)}/chat.json`;
+}
+
+export function isChatJsonPath(chatId: string, path: string): boolean {
+  return path === chatJsonPath(chatId, 1) || path === chatJsonPath(chatId, 2);
+}
+
+export function isMessagePath(chatId: string, path: string, store?: ChatStore): boolean {
+  if (store) return isEventPath(messagesDir(chatId, store), path);
+  return isEventPath(messagesDir(chatId, 1), path) || isEventPath(messagesDir(chatId, 2), path);
 }
 
 // События решений живут рядом с сообщениями, в тех же именах файлов:
 // одно событие — один файл, поэтому параллельные пуши не конфликтуют.
-export function decisionsDir(chatId: string): string {
-  return `chats/${chatId}/decisions`;
+// В подключённом репозитории (store 2) новые решения не пишутся.
+export function decisionsDir(chatId: string, store: ChatStore = 1): string {
+  return `${chatHome(chatId, store)}/decisions`;
 }
 
-export function decisionPath(chatId: string, eventId: string): string {
-  return `${decisionsDir(chatId)}/${eventId}.md`;
+export function decisionPath(chatId: string, eventId: string, store: ChatStore = 1): string {
+  return `${decisionsDir(chatId, store)}/${eventId}.md`;
 }
 
-export function isDecisionPath(chatId: string, path: string): boolean {
-  return isEventPath(decisionsDir(chatId), path);
+export function isDecisionPath(chatId: string, path: string, store?: ChatStore): boolean {
+  if (store) return isEventPath(decisionsDir(chatId, store), path);
+  return isEventPath(decisionsDir(chatId, 1), path) || isEventPath(decisionsDir(chatId, 2), path);
 }
 
 function isEventPath(dir: string, path: string): boolean {

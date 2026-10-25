@@ -1,0 +1,8 @@
+{
+  "name": "@chat0110/cli",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@chat0110/chat-protocol": "workspace:*"
+  }
+}
