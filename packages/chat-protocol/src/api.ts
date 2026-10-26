@@ -108,7 +108,15 @@ export interface ForkRef {
   created_by: string;
 }
 
-// История родителя до точки Fork — снимок на коммите ветвления, неизменный.
+// Один предок в цепочке Fork, обрезанный своей точкой ветвления.
+export interface InheritedAncestor {
+  chat_id: string;
+  title: string;
+  boundary_message_id: string;
+}
+
+// История предков до точек Fork. Снимок нового Fork лежит в самом чате.
+// complete: false — часть цепи потеряна или комментарии не были заморожены.
 export interface InheritedContext {
   chat_id: string;
   title: string;
@@ -116,6 +124,9 @@ export interface InheritedContext {
   message_id: string;
   commit_sha: string;
   items: MessageItem[];
+  complete: boolean;
+  gaps: string[];
+  ancestors: InheritedAncestor[];
 }
 
 export interface TimelineResponse {

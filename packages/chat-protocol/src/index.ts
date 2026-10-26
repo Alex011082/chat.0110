@@ -7,4 +7,5 @@ export * from "./api.ts";
 export * from "./decision.ts";
 export * from "./layout.ts";
 export * from "./migrate.ts";
+export * from "./fork-context.ts";
 export * from "./agents-v2.ts";
