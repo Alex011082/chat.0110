@@ -32,6 +32,7 @@ const STATUS_BY_CODE: Record<ApiErrorCode, number> = {
   bad_request: 400,
   rate_limited: 429,
   conflict: 409,
+  dispatch_cancelled: 409,
   github_error: 502,
 };
 

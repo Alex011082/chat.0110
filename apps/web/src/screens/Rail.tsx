@@ -1,3 +1,4 @@
+import { LanguageSwitch } from "../ui/LanguageSwitch.tsx";
 import { s } from "../strings.ts";
 import { cx, Knob, Mark, TextButton } from "../ui/kit.tsx";
 
@@ -29,6 +30,7 @@ export function Rail({ view, onChats, onTree, onNew, onLogout, canCreate, bottom
         className="flex shrink-0 items-start justify-around gap-2 border-t border-line bg-rail px-3 pt-3 pb-[max(14px,env(safe-area-inset-bottom))]"
       >
         {knobs}
+        <LanguageSwitch />
         <TextButton onClick={onLogout} className="mt-[9px] min-h-10 px-2.5">
           {s.rail.logout}
         </TextButton>
@@ -46,6 +48,7 @@ export function Rail({ view, onChats, onTree, onNew, onLogout, canCreate, bottom
       <Mark cell={3} />
       <span className="-mt-[18px] text-scale tracking-[0.03em] text-ink-2">{s.markSub}</span>
       {knobs}
+        <LanguageSwitch />
       <TextButton onClick={onLogout} className="mt-auto min-h-10 px-2.5">
         {s.rail.logout}
       </TextButton>

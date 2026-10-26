@@ -1,3 +1,6 @@
+import { mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { DispatchStore } from "./dispatch.ts";
 // Точка входа сервиса chat0110 (systemd запускает `bun apps/api/src/main.ts`).
 import { loadConfig, type Config } from "./config.ts";
 import { createApp } from "./http.ts";
@@ -12,7 +15,9 @@ try {
   process.exit(1);
 }
 
-const app = await createApp({ config });
+const statePath = process.env.CHAT0110_DISPATCH_DB ?? (config.devCookies ? resolve(".data/dispatch.sqlite") : "/var/lib/chat0110/dispatch.sqlite");
+if (statePath !== ":memory:") mkdirSync(dirname(statePath),{recursive:true,mode:0o700});
+const app = await createApp({ config, dispatch: new DispatchStore(statePath) });
 // Только 127.0.0.1: снаружи сервис доступен через Caddy с TLS.
 // idleTimeout 60 с; SSE снимает его для себя через server.timeout(req, 0).
 const server = Bun.serve({ hostname: "127.0.0.1", port: config.port, idleTimeout: 60, fetch: app });

@@ -78,7 +78,7 @@ export function Timeline(p: TimelineProps) {
     () => [...p.items, ...p.local.flatMap((e) => (e.item ? [e.item] : []))],
     [p.items, p.local],
   );
-  const groups = useMemo(() => groupByDay(blocks, blockTime, p.now), [blocks, p.now]);
+  const groups = useMemo(() => groupByDay(blocks, blockTime, p.now), [blocks, p.now, s.locale]);
   const forks = useMemo(
     () => groupForks(p.forks, known.flatMap((i) => (i.kind === "message" ? [i.id] : []))),
     [p.forks, known],
@@ -263,7 +263,7 @@ function ForkOrigin({
   const titles = new Map(ancestors.map((a) => [a.chat_id, a.title]));
   const groups = useMemo(
     () => groupByDay(inherited?.items ?? [], (m) => m.created_at, now),
-    [inherited, now],
+    [inherited, now, s.locale],
   );
   let lastOrigin: string | undefined;
   return (

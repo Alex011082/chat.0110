@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@chat0110/chat-protocol": "workspace:*"
+    "@chat0110/chat-protocol": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.32.2"
   }
 }

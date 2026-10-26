@@ -19,6 +19,8 @@ Restart=always
 RestartSec=3
 NoNewPrivileges=true
 PrivateTmp=true
+StateDirectory=chat0110
+StateDirectoryMode=0700
 ProtectSystem=strict
 ProtectHome=true
 

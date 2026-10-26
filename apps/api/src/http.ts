@@ -1,3 +1,5 @@
+import { mentionRoute, newMessageId } from "@chat0110/chat-protocol";
+import { DispatchStore } from "./dispatch.ts";
 // Роутер на голом Bun.serve: маршрутов мало, и рукописная таблица проще
 // фреймворка. Каждый параметр из адреса проверяется регуляркой ДО того,
 // как попадёт в URL GitHub.
@@ -28,6 +30,7 @@ import { createWebhook } from "./webhook.ts";
 
 export interface AppDeps {
   config: Config;
+  dispatch?: DispatchStore;
   fetch?: Fetch;
   now?: () => Date;
   rand?: () => string;
@@ -95,6 +98,7 @@ async function readJson(req: Request): Promise<Record<string, unknown>> {
 
 export async function createApp(deps: AppDeps): Promise<App> {
   const { config } = deps;
+  const dispatch = deps.dispatch ?? new DispatchStore(":memory:");
   const fetcher = deps.fetch ?? fetch;
   const caches = deps.caches ?? createCaches();
   const hub = deps.hub ?? new SseHub();
@@ -199,9 +203,41 @@ export async function createApp(deps: AppDeps): Promise<App> {
         if (method === "GET" && (rest.length === 0 || (rest.length === 1 && rest[0] === "timeline"))) {
           return json(200, await getTimeline(gh, repo, chatId));
         }
+        if (rest.length === 1 && rest[0] === "dispatch" && method === "GET") {
+          await gh.getRepo(repo);
+          return json(200,dispatch.list(session.uid,`${repo.owner}/${repo.name}`,chatId));
+        }
+        if (rest.length === 1 && rest[0] === "dispatch" && method === "POST") {
+          const info = await gh.getRepo(repo);
+          if (!info.can_push) throw forbidden("Нет права записи");
+          const body = await readJson(req);
+          const c = dispatch.chain(String(body.id),session.uid);
+          if (!c || c.repo !== info.full_name.toLowerCase() || c.chat !== chatId) throw notFound("Цепочка не найдена");
+          dispatch.cancel(session.uid,c.id);
+          return json(200,{ok:true});
+        }
         if (method === "POST" && rest.length === 1 && rest[0] === "messages") {
           const body = await readJson(req);
-          const out: PostMessageResponse = { item: await postMessage(ctx, repo, chatId, { text: body.text, reply_to: body.reply_to }) };
+          let route: string[];
+          try { route = mentionRoute(typeof body.text === "string" ? body.text : ""); }
+          catch { throw badRequest("Нужен один @адресат и не больше одного @@участника"); }
+          let delivery: { id: string; author: string } | undefined;
+          let chainId: string | undefined;
+          if (route.length) {
+            if (typeof body.request_id !== "string" || !/^[A-Za-z0-9_-]{8,80}$/.test(body.request_id)) throw badRequest("Нужен request_id для адресного сообщения");
+            const timeline = await getTimeline(gh,repo,chatId);
+            if (!timeline.chat.can_push || timeline.chat.state !== "open") throw forbidden("Чат закрыт или доступен только для чтения");
+            const routeIds = dispatch.resolve(session.uid,`${repo.owner}/${repo.name}`,chatId,route);
+            chainId = `${session.uid}:${body.request_id}`;
+            const old = dispatch.chain(chainId,session.uid);
+            const author = session.login.toLowerCase();
+            delivery = {id:old?.message_id ?? newMessageId(new Date(),author),author};
+            dispatch.enqueue(chainId,session.uid,`${repo.owner}/${repo.name}`,chatId,delivery.id,String(body.text).trim(),routeIds,true);
+            if (old?.status === "cancelled") throw new HttpError(409,"conflict","Цепочка отменена");
+          }
+          const out: PostMessageResponse = { item: await postMessage(ctx, repo, chatId, { text: body.text, reply_to: body.reply_to },delivery) };
+          if (chainId) dispatch.activate(chainId,session.uid);
+          hub.publish(`${repo.owner}/${repo.name}`,"chat.updated",{repo:`${repo.owner}/${repo.name}`,chat_id:chatId,number:null});
           return json(201, out);
         }
         if (method === "POST" && rest.length === 1 && rest[0] === "fork") {
@@ -253,11 +289,71 @@ export async function createApp(deps: AppDeps): Promise<App> {
     return res;
   }
 
+  // Локальный коннектор использует собственную авторизацию GitHub. Токен не сохраняется.
+  async function agentApi(req: Request, path: string): Promise<Response> {
+    if (req.method !== "POST") return json(405,{error:"Только POST",code:"bad_request"});
+    if (req.headers.has("origin") && req.headers.get("origin") !== config.publicOrigin) throw forbidden("Чужой Origin");
+    const token = req.headers.get("authorization")?.match(/^Bearer (\S+)$/)?.[1];
+    if (!token) throw unauthorized();
+    const gh = new GitHubClient({token,userId:0,fetch:fetcher});
+    const user = await gh.getUser();
+    if (!isLoginAllowed(config,user.login)) throw forbidden("Вход закрыт");
+    const body = await readJson(req);
+    const ctx: ChatCtx = {gh,user:{login:user.login,id:user.id}};
+    if (path === "/api/agent/register") {
+      const repo = repoFromParam(body.repo);
+      if (typeof body.chat_id !== "string" || !isChatId(body.chat_id)) throw badRequest("Неверный чат");
+      const data = await getTimeline(gh,repo,body.chat_id);
+      if (!data.chat.can_push || data.chat.state !== "open") throw forbidden("Чат закрыт или недоступен для записи");
+      return json(200,dispatch.register(user.id,data.chat.repo,body.chat_id,String(body.session_id ?? ""),String(body.alias ?? ""),String(body.name ?? ""),String(body.author ?? ""),String(body.model ?? "")));
+    }
+    const session = dispatch.session(String(body.session_id),user.id);
+    const repo = repoFromParam(session.repo);
+    const info = await gh.getRepo(repo);
+    if (!info.can_push) throw forbidden("Нет права записи");
+    dispatch.touch(session.id);
+    if (path === "/api/agent/next") {
+      const pull = await gh.findChatPull(repo,session.chat);
+      if (!pull || pull.state !== "open") throw new HttpError(409,"conflict","Чат закрыт");
+      const until = Date.now() + (body.wait === true ? 25_000 : 0);
+      let task;
+      do {
+        task = dispatch.claim(session.id);
+        if (task || Date.now() >= until || req.signal.aborted) break;
+        await Bun.sleep(500);
+      } while (true);
+      if (!task) return json(200,{task:null});
+      const chain = dispatch.chain(task.chain_id,user.id)!;
+      return json(200,{task, prompt:chain.prompt, repo:session.repo, chat_id:session.chat,
+        url:`${config.publicUrl}/${session.repo}/${session.chat}`,
+        final:task.step === JSON.parse(chain.route).length-1});
+    }
+    const task = dispatch.task(String(body.task_id),session.id,String(body.claim));
+    if (path === "/api/agent/heartbeat") {
+      dispatch.heartbeat(task.id,session.id,String(body.claim));
+      return json(200,{ok:true});
+    }
+    if (path === "/api/agent/context") return json(200,await getTimeline(gh,repo,session.chat));
+    if (path === "/api/agent/complete") {
+      if (typeof body.text !== "string" || !body.text.trim() || body.text.length > 60_000) throw badRequest("Нужен ответ до 60000 знаков");
+      // Одинаковый id и сохранённый текст делают повтор после обрыва безопасным.
+      dispatch.prepareAnswer(task.id,session.id,String(body.claim),body.text.trim());
+      const timeline = await getTimeline(gh,repo,session.chat);
+      if (timeline.chat.state !== "open") throw new HttpError(409,"conflict","Чат закрыт");
+      const item = await postMessage(ctx,repo,session.chat,{text:body.text,reply_to:task.reply_to},{id:task.answer_id,author:session.author});
+      dispatch.finish(task.id,String(body.claim),item.id);
+      hub.publish(session.repo,"chat.updated",{repo:session.repo,chat_id:session.chat,number:null});
+      return json(200,{item});
+    }
+    throw notFound("Неизвестный метод коннектора");
+  }
+
   return async (req, server) => {
     const url = new URL(req.url);
     const path = url.pathname;
     const method = req.method;
     try {
+      if (path.startsWith("/api/agent/")) return await agentApi(req,path);
       if (path === "/health") return json(200, { ok: true });
       // Вебхук приходит от GitHub без Origin; его защищает HMAC-подпись.
       if (path === "/api/github/webhook") {

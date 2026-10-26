@@ -465,6 +465,7 @@ export async function postMessage(
   repo: RepoRef,
   chatId: string,
   req: { text?: unknown; reply_to?: unknown },
+  delivery?: { id: string; author: string },
 ): Promise<MessageItem> {
   const { gh } = ctx;
   const clock = ctx.now ?? (() => new Date());
@@ -475,15 +476,16 @@ export async function postMessage(
     if (typeof req.reply_to !== "string" || !parseMessageId(req.reply_to)) throw badRequest("reply_to — не id сообщения");
     replyTo = req.reply_to;
   }
-  const login = authorOf(ctx.user.login);
+  const login = delivery?.author ?? authorOf(ctx.user.login);
   const info = await gh.getRepo(repo);
   if (!info.can_push) throw forbidden(`Нет права на запись в ${info.full_name}`);
   const branch = branchForChat(chatId);
   const store = await gh.chatStore(repo, branch);
 
   for (let attempt = 1; ; attempt++) {
-    const at = clock();
+    const at = delivery ? new Date(parseMessageId(delivery.id)!.date) : clock();
     const msg: MessageFile = { id: newMessageId(at, login, rand), author: login, created_at: isoSeconds(at), text };
+    if (delivery) msg.id = delivery.id;
     if (replyTo) msg.reply_to = replyTo;
     const path = messagePath(chatId, msg.id, store);
     const outside = conversationViolation([path], store);
@@ -491,7 +493,10 @@ export async function postMessage(
     try {
       // Каждое сообщение — новый файл: параллельные авторы не конфликтуют по
       // содержимому, а 409 значит лишь «голова ветки сдвинулась» — повторяем.
-      const r = await gh.putFile(repo, path, {
+      const existing = delivery ? await gh.getFileText(repo, path, branch) : null;
+      const content = serializeMessageFile(msg);
+      if (existing !== null && existing !== content) throw new HttpError(409, "conflict", "Сообщение с этим id уже содержит другой ответ");
+      const r = existing !== null ? { commitSha: "", commitUrl: `https://github.com/${info.full_name}/blob/${branch}/${path}` } : await gh.putFile(repo, path, {
         message: `chat(${chatId}): ${login}`,
         content: serializeMessageFile(msg),
         branch,
@@ -504,7 +509,7 @@ export async function postMessage(
         source: "file",
         text,
         created_at: new Date(msg.created_at).toISOString(),
-        actor: login,
+        actor: authorOf(ctx.user.login),
         commit_sha: r.commitSha,
         url: r.commitUrl,
         pending: false,

@@ -347,3 +347,51 @@ describe("раздача интерфейса", () => {
     expect(await res.text()).toContain("Интерфейс");
   });
 });
+
+test("адресное сообщение проходит Claude → Codex → Claude; повтор HTTP не дублирует Git", async () => {
+  const {app,cookie,fake}=await setup();
+  const chat="20261023-k7q2";
+  const path=`/api/chats/Alex011082/chat.0110/${chat}`;
+  const files=new Map<string,string>();
+  const pr={number:5,title:"Test",body:`<!-- chat0110\nchat_id: ${chat}\nschema_version: 1\n-->`,state:"open",draft:true,html_url:"https://github.com/Alex011082/chat.0110/pull/5",created_at:"2026-10-23T00:00:00Z",updated_at:"2026-10-23T00:00:00Z",user:{login:"Alex011082"},head:{ref:`chat/${chat}`,sha:"head",repo:{full_name:"Alex011082/chat.0110"}},base:{ref:"main"}};
+  fake.on("GET",R.toLowerCase(),{body:repoBody}).on("GET",/\/repos\/alex011082\/chat\.0110\/pulls\?/i,c=>({body:c.url.searchParams.has("base")?[]:[pr]}))
+    .on("GET",/\/compare\//,{status:404})
+    .on("GET",/\/(issues|pulls)\/5\/(comments|reviews)/,{body:[]})
+    .on("GET",/\/contents\//,c=>{
+      const value=files.get(c.url.pathname.toLowerCase());
+      return value?{body:{content:Buffer.from(value).toString("base64")}}:{status:404};
+    })
+    .on("PUT",/\/contents\//,c=>{
+      if(files.has(c.url.pathname.toLowerCase()))return {status:422,body:{message:"exists"}};
+      files.set(c.url.pathname.toLowerCase(),Buffer.from(c.body.content,"base64").toString("utf8"));
+      return {status:201,body:{commit:{sha:"commit",html_url:"https://github.com/c/commit"}}};
+    });
+  const agent=async(method:string,body:unknown)=>{
+    const response=await app(new Request(`${PUBLIC}/api/agent/${method}`,{method:"POST",headers:{authorization:"Bearer test-user-token","content-type":"application/json"},body:JSON.stringify(body)}));
+    const result=await response.json();
+    expect(response.status).toBe(200);
+    return result;
+  };
+  const a=await agent("register",{repo:"Alex011082/chat.0110",chat_id:chat,session_id:"claude-instance",alias:"claude-work",name:"Claude",author:"claude",model:"sonnet"});
+  const b=await agent("register",{repo:"Alex011082/chat.0110",chat_id:chat,session_id:"codex-instance",alias:"codex-work",name:"Codex",author:"codex",model:"sol"});
+  const body={request_id:"unique-request-123",text:"@Клоду Проверь мобильную версию и обсуди с @@Соль"};
+  for(let i=0;i<2;i++)expect((await app(post(`${path}/messages`,body,{cookie}))).status).toBe(201);
+  expect(files.size).toBe(1);
+  expect((await agent("next",{session_id:b.id})).task).toBeNull();
+  for(const [index,sess] of [a,b,a].entries()) {
+    const {task}=await agent("next",{session_id:sess.id});
+    expect(task.step).toBe(index);
+    expect((await agent("next",{session_id:sess.id})).task).toBeNull();
+    const completion={session_id:sess.id,task_id:task.id,claim:task.claim,text:`Ответ ${index}`};
+    await agent("complete",completion);
+    await agent("complete",completion);
+  }
+  expect(files.size).toBe(4);
+  expect((await agent("next",{session_id:a.id})).task).toBeNull();
+  const view=await (await app(get(`${path}/dispatch`,cookie))).json();
+  expect(view.chains[0].status).toBe("done");
+  expect([...files.values()][1]).toContain("author: claude");
+  expect([...files.values()][2]).toContain("author: codex");
+  const unauth=await app(new Request(`${PUBLIC}/api/agent/next`,{method:"POST",body:"{}"}));
+  expect(unauth.status).toBe(401);
+});

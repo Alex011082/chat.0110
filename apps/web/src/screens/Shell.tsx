@@ -239,7 +239,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
     async (key: string, repo: string, chatId: string, entry: LocalEntry) => {
       try {
         const req = entry.reply_to ? { text: entry.text, reply_to: entry.reply_to } : { text: entry.text };
-        const { item } = await api().postMessage(repo, chatId, req);
+        const { item } = await api().postMessage(repo, chatId, { ...req, request_id: entry.localId });
         patchEntry(key, entry.localId, { status: "published", item, error: undefined });
         if (latest.current.open?.chat_id === chatId) void latest.current.loadTimeline();
       } catch (e) {

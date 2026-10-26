@@ -1,3 +1,4 @@
+import { LanguageSwitch } from "../ui/LanguageSwitch.tsx";
 import type { MessageItem, TimelineResponse } from "@chat0110/chat-protocol";
 import { useMemo, type ReactNode } from "react";
 import { ApiFailure, errorText } from "../api.ts";
@@ -115,6 +116,7 @@ export function ChatView(p: ChatViewProps) {
                 </span>
               </span>
             </div>
+            <LanguageSwitch />
             <RoundKey aria-label={s.header.infoKnob} aria-expanded={p.infoOpen} onClick={p.onInfo} />
           </Body>
           {timeline}
