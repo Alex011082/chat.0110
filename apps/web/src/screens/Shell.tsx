@@ -534,6 +534,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       outgoing={current.data.outgoing ?? []}
       onJump={() => setInfoOpen(false)}
       onPropose={current.data.chat_store === 2 || !current.data.chat.parent ? null : openPropose}
+      store={current.data.chat_store}
     />
   ) : null;
 

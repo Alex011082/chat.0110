@@ -55,6 +55,9 @@ describe("agentLinkPhrase — фраза для агента", () => {
     expect(agentLinkPhrase("https://github.com/Alex011082/chat.0110/pull/3")).toBe(
       "Прочитай чат https://github.com/Alex011082/chat.0110/pull/3 по правилам chats/AGENTS.md и ответь новым файлом в ту же ветку.",
     );
+    expect(agentLinkPhrase("https://github.com/Alex011082/chat.0110/pull/3", 2)).toBe(
+      "Прочитай чат https://github.com/Alex011082/chat.0110/pull/3 по правилам Chat/AGENTS.md и ответь новым файлом в ту же ветку.",
+    );
   });
 });
 

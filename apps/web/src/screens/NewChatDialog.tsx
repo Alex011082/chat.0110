@@ -1,5 +1,5 @@
 import type { ChatSummary, RepoInfo } from "@chat0110/chat-protocol";
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
 import { api, errorText } from "../api.ts";
 import { s } from "../strings.ts";
 import { ActionKey, cx, Key, Readout, Screen, SLOT } from "../ui/kit.tsx";
@@ -27,7 +27,7 @@ export function NewChatDialog(p: NewChatProps) {
   );
 }
 
-function NewChatForm({ onClose, repos, repo, installUrl, onCreated }: NewChatProps) {
+function NewChatForm({ open, onClose, repos, repo, installUrl, onCreated }: NewChatProps) {
   const writable = repos.filter((r) => r.can_push);
   const initial = writable.find((r) => r.full_name.toLowerCase() === repo?.toLowerCase()) ?? writable[0];
   const [target, setTarget] = useState(initial?.full_name ?? "");
@@ -35,7 +35,25 @@ function NewChatForm({ onClose, repos, repo, installUrl, onCreated }: NewChatPro
   const [first, setFirst] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rulesDoc, setRulesDoc] = useState<string | null>(null);
   const ids = useId();
+
+  useEffect(() => {
+    if (!open || !target) return;
+    let cancel = false;
+    setRulesDoc(null);
+    void api()
+      .activation(target)
+      .then((status) => {
+        if (!cancel) setRulesDoc(s.info.agentsDoc(status.activated ? 2 : 1));
+      })
+      .catch(() => {
+        if (!cancel) setRulesDoc(s.info.agentsDoc(1));
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [open, target]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -132,7 +150,7 @@ function NewChatForm({ onClose, repos, repo, installUrl, onCreated }: NewChatPro
         <Readout small label={s.newChat.branch} value={s.newChat.branchValue} />
         <Readout small label={s.newChat.pr} value={s.newChat.prValue} />
         <div className="col-span-2">
-          <Readout small label={s.newChat.rules} value={s.newChat.rulesValue} />
+          <Readout small label={s.newChat.rules} value={rulesDoc ?? s.loading} />
         </div>
       </Screen>
 

@@ -214,8 +214,10 @@ export const s = {
     humanWrote: (when: string) => `писал ${when}`,
     agentLink: "Ссылка для агента",
     agentLinkHelp: "Отправь Claude или Codex в их приложении — они прочитают чат и ответят в эту ветку.",
-    agentPhrase: (url: string) =>
-      `Прочитай чат ${url} по правилам chats/AGENTS.md и ответь новым файлом в ту же ветку.`,
+    /** 2 — репозиторий подключён, инструкция в Chat/. Иначе прежний chats/. */
+    agentsDoc: (store?: 1 | 2) => (store === 2 ? "Chat/AGENTS.md" : "chats/AGENTS.md"),
+    agentPhrase: (url: string, store?: 1 | 2) =>
+      `Прочитай чат ${url} по правилам ${s.info.agentsDoc(store)} и ответь новым файлом в ту же ветку.`,
     copy: "Скопировать",
     about: "О чате",
     createdBy: "Создал",
@@ -422,7 +424,6 @@ export const s = {
     pr: "Pull request",
     prValue: "draft · метка chat0110",
     rules: "Правила для агентов",
-    rulesValue: "chats/AGENTS.md",
     create: "Создать чат",
     creating: "Создаю…",
     noWritable: "Нет репозиториев с правом записи — создать чат негде.",
