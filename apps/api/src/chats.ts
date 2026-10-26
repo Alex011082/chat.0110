@@ -16,6 +16,7 @@ import {
   decisionPath,
   displayName,
   findForkCommit,
+  forkContextPath,
   foldDecisions,
   isAgent,
   isAuthor,
@@ -25,11 +26,11 @@ import {
   newMessageId,
   parseChatJson,
   parseDecisionFile,
-  parseMessageFile,
   parseMessageId,
   randomSuffix,
   serializeChatJson,
   serializeDecisionFile,
+  serializeForkContext,
   serializeMessageFile,
   type AcceptAgentPrResponse,
   type ChatMeta,
@@ -43,7 +44,6 @@ import {
   type GraphDecision,
   type GraphMessage,
   type GraphResponse,
-  type InheritedContext,
   type MessageFile,
   type MessageItem,
   type Participant,
@@ -52,6 +52,7 @@ import {
   type TimelineResponse,
 } from "@chat0110/chat-protocol";
 import { CHATS_AGENTS_MD, CHATS_CLAUDE_MD } from "./agents-md.ts";
+import { draftForkContext, readInherited, type ForkContextDraft } from "./fork-context.ts";
 import { HttpError, badRequest, forbidden, notFound } from "./errors.ts";
 import { GitHubError, mapLimit, type ChatPull, type GhRepo, type GitHubClient, type RepoRef } from "./github.ts";
 
@@ -171,32 +172,7 @@ function forksOf(chatId: string, chats: ChatPull[]): ForkRef[] {
     .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.chat_id.localeCompare(b.chat_id)));
 }
 
-// История прямого родителя до точки Fork: файлы его чата на коммите
-// ветвления. Всё, что там лежит, по построению не позже выбранного сообщения.
-// Деды не подтягиваются: у родителя своя лента со своим inherited.
-async function inheritedOf(gh: GitHubClient, repo: RepoRef, parent: ForkPoint, chats: ChatPull[]): Promise<InheritedContext> {
-  const files = await gh.getMessageFilesAt(repo, parent.chat_id, parent.commit_sha);
-  const items: MessageItem[] = [];
-  for (const f of files) {
-    const msg = parseMessageFile(f.name, f.content);
-    if (!msg) continue;
-    const item: MessageItem = {
-      kind: "message", id: msg.id, author: msg.author, display: displayName(msg.author), source: "file",
-      text: msg.text, created_at: msg.created_at, pending: false,
-    };
-    if (msg.reply_to) item.reply_to = msg.reply_to;
-    items.push(item);
-  }
-  const pull = chats.find((c) => c.chatId === parent.chat_id);
-  return {
-    chat_id: parent.chat_id,
-    title: pull ? chatTitleFromPr(pull.title) : parent.chat_id,
-    number: pull?.number ?? null,
-    message_id: parent.message_id,
-    commit_sha: parent.commit_sha,
-    items: items.sort(byTimeThenId),
-  };
-}
+
 
 // События решений → решения. Битый файл пропускается молча, как в ленте:
 // его пишут и агенты руками.
@@ -217,7 +193,7 @@ export async function getTimeline(gh: GitHubClient, repo: RepoRef, chatId: strin
   // Источник истины — chat.json; тело PR — запасной путь (chat.json битый или его нет).
   const parent = meta?.parent ?? pull.parent;
   const [inherited, outgoing] = await Promise.all([
-    parent ? inheritedOf(gh, repo, parent, chats) : null,
+    parent ? readInherited(gh, repo, chatId, parent, chats, store) : null,
     parent ? outgoingOf(gh, repo, chatId, parent.chat_id) : [],
   ]);
   return {
@@ -301,6 +277,7 @@ export interface ForkOptions {
   baseSha: string;
   prBase: string;
   parent: ChatParent;
+  context: ForkContextDraft;
 }
 
 export async function createChat(
@@ -371,6 +348,22 @@ export async function createChat(
     if (needAgents) files.push({ path: agentsPath, content: agentsDoc });
     if (needClaude) files.push({ path: claudePath, content: claudeDoc });
     if (firstMsg) files.push({ path: messagePath(chatId, firstMsg.id, store), content: serializeMessageFile(firstMsg) });
+    if (fork) {
+      const pointOnly: ForkPoint = { chat_id: fork.parent.chat_id, message_id: fork.parent.message_id, commit_sha: fork.parent.commit_sha };
+      files.push({
+        path: forkContextPath(chatId, store),
+        content: serializeForkContext({
+          schema_version: 1,
+          chat_id: chatId,
+          created_at: createdAt,
+          created_by: login,
+          parent: pointOnly,
+          complete: fork.context.complete,
+          gaps: fork.context.gaps,
+          ancestors: fork.context.ancestors,
+        }),
+      });
+    }
     const outside = conversationViolation(files.map((f) => f.path), store);
     if (outside) throw forbidden(`Запись вне каталога чата: ${outside}`);
     const tree = await gh.createTree(repo, baseTree, files);
@@ -463,7 +456,8 @@ export async function forkChat(
 
   const parent: ChatParent = { chat_id: parentId, message_id: messageId, commit_sha: sha };
   if (reason) parent.reason = reason;
-  return createChat(ctx, repo, { title, ...(first ? { first_message: first } : {}) }, { baseSha: sha, prBase: branchForChat(parentId), parent });
+  const context = await draftForkContext(gh, repo, parent, input, pull);
+  return createChat(ctx, repo, { title, ...(first ? { first_message: first } : {}) }, { baseSha: sha, prBase: branchForChat(parentId), parent, context });
 }
 
 export async function postMessage(

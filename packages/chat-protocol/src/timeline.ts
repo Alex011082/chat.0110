@@ -72,6 +72,8 @@ export interface MessageItem {
   author: string;
   display: string;
   source: "file" | "comment" | "agent_pr";
+  /** Чат, из которого сообщение попало в снимок Fork. В своей ленте поля нет. */
+  origin_chat_id?: string;
   text: string;
   reply_to?: string;
   created_at: string;

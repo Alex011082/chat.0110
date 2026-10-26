@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildPrBody, parseMessageFile, parsePrBody, serializeDecisionFile, type DecisionEvent } from "@chat0110/chat-protocol";
+import { buildPrBody, gapComments, parseMessageFile, parsePrBody, serializeDecisionFile, type DecisionEvent } from "@chat0110/chat-protocol";
 import { CHATS_AGENTS_MD } from "../src/agents-md.ts";
 import {
   acceptAgentPr, createChat, createDecision, decisionAction, forkChat, getGraph, getTimeline, listChats, postMessage, proposeToParent, type ChatCtx,
@@ -305,6 +305,8 @@ describe("лента дочернего чата", () => {
       .on("GET", `${R}/contents/chats/${CHILD}/decisions`, NOT_FOUND)
       .on("GET", `${R}/contents/${DDIR}`, NOT_FOUND)
       .on("GET", `${R}/contents/chats/${CHILD}/chat.json`, chatJson ? { body: { content: b64(JSON.stringify(chatJson)) } } : { status: 404, body: { message: "Not Found" } })
+      .on("GET", `${R}/contents/chats/${CHILD}/context.json`, NOT_FOUND)
+      .on("GET", `${R}/contents/chats/${CHAT}/chat.json`, NOT_FOUND)
       .on("GET", `${R}/compare/main...${CHILD_BRANCH}`, { body: { merge_base_commit: { sha: "base" } } })
       // Ветка ребёнка растёт из коммита родителя: ниже S4 — история родителя.
       .on("GET", /\/commits\?sha=chat%2F20261023-m2p9/, {
@@ -338,9 +340,12 @@ describe("лента дочернего чата", () => {
     expect(res.chat.meta?.parent).toEqual({ ...PARENT, reason: "Механика" });
     expect(res.inherited).toEqual({
       chat_id: CHAT, title: "RoboChain — захват", number: 5, message_id: C, commit_sha: S2,
+      complete: false,
+      gaps: [gapComments(CHAT)],
+      ancestors: [{ chat_id: CHAT, title: "RoboChain — захват", boundary_message_id: C }],
       items: [
-        { kind: "message", id: A, author: "alex011082", display: "alex011082", source: "file", text: "Нужны варианты.", created_at: "2026-10-23T10:03:00.000Z", pending: false },
-        { kind: "message", id: C, author: "claude", display: "Claude", source: "file", text: "Вакуум.", reply_to: A, created_at: "2026-10-23T10:14:00.000Z", pending: false },
+        { kind: "message", id: A, origin_chat_id: CHAT, author: "alex011082", display: "alex011082", source: "file", text: "Нужны варианты.", created_at: "2026-10-23T10:03:00.000Z", pending: false },
+        { kind: "message", id: C, origin_chat_id: CHAT, author: "claude", display: "Claude", source: "file", text: "Вакуум.", reply_to: A, created_at: "2026-10-23T10:14:00.000Z", pending: false },
       ],
     });
     const listing = fake.find("GET", `${R}/contents/${DIR}`);
@@ -384,6 +389,29 @@ describe("лента дочернего чата", () => {
     expect(res.chat.meta).toBeNull();
     expect(res.inherited).toMatchObject({ chat_id: CHAT, title: CHAT, number: null, message_id: C, commit_sha: S2 });
     expect(res.inherited?.items.length).toBe(2);
+  });
+
+  test("снимок на ветке ребёнка: предки из файла, каталог родителя не читается", async () => {
+    const root = "20261023-aaa1";
+    const midMsg = "20261023T090000Z-alex011082-aaa1";
+    const snap = {
+      schema_version: 1, chat_id: CHILD, created_at: "2026-10-23T11:00:00Z", created_by: "bob",
+      parent: PARENT, complete: true, gaps: [],
+      ancestors: [
+        { chat_id: root, title: "Корень", number: 4, boundary_message_id: midMsg, commit_sha: S1, messages: [
+          { id: midMsg, origin_chat_id: root, author: "alex011082", source: "file", created_at: "2026-10-23T09:00:00.000Z", text: "Корень" },
+        ] },
+        { chat_id: CHAT, title: "RoboChain — захват", number: 5, boundary_message_id: C, commit_sha: S2, messages: [
+          { id: A, origin_chat_id: CHAT, author: "alex011082", source: "file", created_at: "2026-10-23T10:03:00.000Z", text: "Нужны варианты." },
+        ] },
+      ],
+    };
+    const fake = childFake().on("GET", `${R}/contents/chats/${CHILD}/context.json`, { body: { content: b64(JSON.stringify(snap)) } });
+    const res = await getTimeline(ctx(fake).gh, REPO, CHILD);
+    expect(res.inherited?.complete).toBe(true);
+    expect(res.inherited?.gaps).toEqual([]);
+    expect(res.inherited?.items.map((m) => [m.origin_chat_id, m.id])).toEqual([[root, midMsg], [CHAT, A]]);
+    expect(fake.find("GET", `${R}/contents/${DIR}`).length).toBe(0);
   });
 });
 
@@ -533,6 +561,7 @@ describe("Fork", () => {
       .on("GET", `${R}/git/blobs/sA`, { body: { content: b64(fileText(A, "alex011082", "2026-10-23T10:03:00Z") + "Нужны варианты."), encoding: "base64" } })
       .on("GET", `${R}/git/blobs/sC`, { body: { content: b64(fileText(C, "claude", "2026-10-23T10:14:00Z") + "Вакуум."), encoding: "base64" } })
       .on("GET", `${R}/contents/chats/${CHAT}/chat.json`, { status: 404, body: { message: "Not Found" } })
+      .on("GET", `${R}/contents/chats/${CHAT}/context.json`, NOT_FOUND)
       .on("GET", `${R}/compare/main...${BRANCH}`, { body: { merge_base_commit: { sha: "base" } } })
       .on("GET", /\/commits\?sha=chat%2F20261023-k7q2/, {
         body: [
@@ -577,7 +606,13 @@ describe("Fork", () => {
     const tree = fake.find("POST", `${R}/git/trees`)[0]!.body;
     expect(tree.base_tree).toBe("tree-2222");
     const byPath = Object.fromEntries(tree.tree.map((e: any) => [e.path, e]));
-    expect(Object.keys(byPath).sort()).toEqual([`chats/${CHILD}/chat.json`, `chats/${CHILD}/messages/${M}.md`, "chats/CLAUDE.md"].sort());
+    expect(Object.keys(byPath).sort()).toEqual([`chats/${CHILD}/chat.json`, `chats/${CHILD}/context.json`, `chats/${CHILD}/messages/${M}.md`, "chats/CLAUDE.md"].sort());
+    const snap = JSON.parse(byPath[`chats/${CHILD}/context.json`].content);
+    expect(snap.complete).toBe(true);
+    expect(snap.gaps).toEqual([]);
+    expect(snap.parent).toEqual(point);
+    expect(snap.ancestors.map((a: { chat_id: string }) => a.chat_id)).toEqual([CHAT]);
+    expect(snap.ancestors[0].messages.map((m: { id: string }) => m.id)).toEqual([A, C]);
     expect(JSON.parse(byPath[`chats/${CHILD}/chat.json`].content)).toEqual({
       schema_version: 1, chat_id: CHILD, title: "Механический захват", created_at: "2026-10-23T10:02:03Z", created_by: "alex011082",
       parent: { ...point, reason: "Исследовать механику" },
@@ -653,6 +688,59 @@ describe("Fork", () => {
     const err = await failure(forkChat(ctx(fake, ["m2p9"]), REPO, CHAT, { message_id: C, title: "Тема" }));
     expect(err.code).toBe("github_error");
     expect(fake.find("DELETE", `${R}/git/refs/heads/${CHILD_BRANCH}`).length).toBe(1);
+  });
+
+  test("два уровня: поздний файл середины не входит в снимок", async () => {
+    const root = "20261023-aaa1";
+    const mid = "20261023-bbb2";
+    const sa = "a".repeat(40);
+    const sb = "b".repeat(40);
+    const mr = "20261023T090000Z-alex011082-aaa1";
+    const mm = "20261023T100000Z-alex011082-bbb2";
+    const late = "20261023T120000Z-alex011082-late";
+    const midBranch = `chat/${mid}`;
+    const passport = (id: string, title: string, parent: object | null) => ({
+      schema_version: 1, chat_id: id, title, created_at: "2026-10-23T09:00:00Z", created_by: "alex011082", parent,
+    });
+    const listing = (id: string, names: string[]) => names.map((n) => ({ type: "file", name: `${n}.md`, path: `chats/${id}/messages/${n}.md`, sha: `blob-${n}` }));
+    const fake = new FakeGitHub()
+      .on("GET", R, { body: repoBody() })
+      .on("GET", /\/pulls\?state=all&head=Alex011082%3Achat%2F20261023-bbb2/, { body: [chatPr({ number: 8, title: "Середина", head: { ref: midBranch, sha: "headmid", repo: { full_name: "Alex011082/chat.0110" } }, body: `<!-- chat0110\nchat_id: ${mid}\nschema_version: 1\nparent_chat_id: ${root}\nparent_message_id: ${mr}\nfork_commit_sha: ${sa}\n-->\n` })] })
+      .on("GET", `${R}/contents/chats/${mid}/messages`, (c) => ({ body: listing(mid, c.url.searchParams.get("ref") === sb ? [mm] : [mm, late]) }))
+      .on("GET", `${R}/contents/chats/${root}/messages`, { body: listing(root, [mr]) })
+      .on("GET", `${R}/contents/chats/${mid}/decisions`, NOT_FOUND)
+      .on("GET", `${R}/contents/chats/${mid}/chat.json`, { body: { content: b64(JSON.stringify(passport(mid, "Середина", { chat_id: root, message_id: mr, commit_sha: sa }))) } })
+      .on("GET", `${R}/contents/chats/${root}/chat.json`, { body: { content: b64(JSON.stringify(passport(root, "Корень", null))) } })
+      .on("GET", `${R}/contents/chats/${mid}/context.json`, NOT_FOUND)
+      .on("GET", `${R}/git/blobs/blob-${mr}`, { body: { content: b64(fileText(mr, "alex011082", "2026-10-23T09:00:00Z") + "Корень."), encoding: "base64" } })
+      .on("GET", `${R}/git/blobs/blob-${mm}`, { body: { content: b64(fileText(mm, "alex011082", "2026-10-23T10:00:00Z") + "Середина."), encoding: "base64" } })
+      .on("GET", `${R}/git/blobs/blob-${late}`, { body: { content: b64(fileText(late, "alex011082", "2026-10-23T12:00:00Z") + "Поздно."), encoding: "base64" } })
+      .on("GET", `${R}/compare/main...${midBranch}`, { body: { merge_base_commit: { sha: "base" } } })
+      .on("GET", /\/commits\?sha=chat%2F20261023-bbb2/, { body: [ghCommit(sb, "Alex011082", "Alex", "2026-10-23T10:00:00Z", `chat(${mid}): alex011082`)] })
+      .on("GET", `${R}/commits/${sb}`, { body: { files: [{ filename: `chats/${mid}/messages/${mm}.md`, status: "added" }] } })
+      .on("GET", `${R}/issues/8/comments`, { body: [] })
+      .on("GET", `${R}/pulls/8/reviews`, { body: [] })
+      .on("GET", `${R}/pulls/8/comments`, { body: [] })
+      .on("GET", /\/pulls\?state=all&base=chat%2F20261023-bbb2/, { body: [] })
+      .on("GET", `${R}/contents/chats/AGENTS.md`, { body: { content: b64("x") } })
+      .on("GET", `${R}/contents/chats/CLAUDE.md`, { body: { content: b64("x") } })
+      .on("GET", /\/git\/commits\/[0-9a-f]{40}$/, { body: { tree: { sha: "tree-mid" } } })
+      .on("POST", `${R}/git/trees`, { status: 201, body: { sha: "newtree" } })
+      .on("POST", `${R}/git/commits`, { status: 201, body: { sha: "newcommit" } })
+      .on("POST", `${R}/git/refs`, { status: 201, body: {} })
+      .on("POST", `${R}/pulls`, (c) => ({ status: 201, body: { number: 12, title: c.body.title, draft: true, state: "open", html_url: "https://github.com/pull/12", created_at: "2026-10-23T10:02:04Z", updated_at: "2026-10-23T10:02:04Z", user: { login: "Alex011082" } } }))
+      .on("POST", `${R}/labels`, { status: 201, body: {} })
+      .on("POST", `${R}/issues/12/labels`, { body: [] });
+    await forkChat(ctx(fake, ["q9w1", "m2p9"]), REPO, mid, { message_id: mm, title: "Дальше" });
+    const snap = JSON.parse(fake.find("POST", `${R}/git/trees`)[0]!.body.tree.find((e: { path: string }) => e.path.endsWith("context.json")).content);
+    expect(snap.complete).toBe(false);
+    expect(snap.ancestors.map((a: { chat_id: string; messages: { id: string }[] }) => [a.chat_id, a.messages.map((m) => m.id)])).toEqual([
+      [root, [mr]],
+      [mid, [mm]],
+    ]);
+    expect(JSON.stringify(snap)).not.toContain(late);
+    expect(fake.find("GET", `${R}/contents/chats/${root}/messages`)[0]!.url.searchParams.get("ref")).toBe(sa);
+    expect(fake.find("GET", `${R}/contents/chats/${mid}/messages`).some((c) => c.url.searchParams.get("ref") === sb)).toBe(true);
   });
 });
 

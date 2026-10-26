@@ -258,10 +258,14 @@ function ForkOrigin({
   const count = inherited?.items.length ?? 0;
   const reason = chat.meta?.parent?.reason;
   const listId = `inherited-${chat.chat_id}`;
+  const ancestors = inherited?.ancestors ?? [];
+  const boundaries = new Set(ancestors.map((a) => a.boundary_message_id));
+  const titles = new Map(ancestors.map((a) => [a.chat_id, a.title]));
   const groups = useMemo(
     () => groupByDay(inherited?.items ?? [], (m) => m.created_at, now),
     [inherited, now],
   );
+  let lastOrigin: string | undefined;
   return (
     <>
       <Screen className="mt-2 mb-3 flex flex-col gap-2 px-4 py-3.5 tab:mt-0">
@@ -272,6 +276,9 @@ function ForkOrigin({
           <span className="text-ink-2">{s.timeline.forkFromMessage(from.display, from.excerpt)}</span>
         </p>
         {reason ? <p className="m-0 text-cap leading-[1.45] text-ink-2">{s.timeline.forkReason(reason)}</p> : null}
+        {inherited && inherited.gaps.length > 0 ? (
+          <p className="m-0 text-cap leading-[1.45] text-ink-2">{inherited.gaps.join(" ")}</p>
+        ) : null}
         <div className="flex flex-wrap gap-x-5 gap-y-0.5">
           <AppLink
             to={chatRoute(chat.repo, parent.chat_id)}
@@ -304,9 +311,18 @@ function ForkOrigin({
                 <span className="scale">{g.label}</span>
                 <span className="h-px flex-1 bg-line" />
               </div>
-              {g.items.map((m) => (
-                <InheritedMessage key={m.id} m={m} point={m.id === parent.message_id} />
-              ))}
+              {g.items.map((m) => {
+                const showOrigin = ancestors.length > 1 && m.origin_chat_id !== undefined && m.origin_chat_id !== lastOrigin;
+                lastOrigin = m.origin_chat_id ?? lastOrigin;
+                return (
+                  <InheritedMessage
+                    key={m.id}
+                    m={m}
+                    point={boundaries.size > 0 ? boundaries.has(m.id) : m.id === parent.message_id}
+                    origin={showOrigin ? titles.get(m.origin_chat_id!) ?? m.origin_chat_id! : null}
+                  />
+                );
+              })}
             </div>
           ))}
         </section>
@@ -316,11 +332,12 @@ function ForkOrigin({
 }
 
 /** Сообщение родителя: приглушённое, только чтение, без клавиш. */
-function InheritedMessage({ m, point }: { m: MessageItem; point: boolean }) {
+function InheritedMessage({ m, point, origin }: { m: MessageItem; point: boolean; origin: string | null }) {
   return (
     <article className="flex gap-3.5 py-3 opacity-60">
       <Avatar author={m.author} display={m.display} human={!isAgent(m.author)} />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
+        {origin ? <span className="scale text-ink-2">{origin}</span> : null}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <b className="text-copy font-semibold">{m.display}</b>
           <span className="text-cap text-ink-2">{dateTimeShort(m.created_at)}</span>

@@ -453,6 +453,9 @@ export function createMockApi(mode: string): Api {
         message_id: c.parent.message_id,
         commit_sha: c.parent.commit_sha,
         items: upTo >= 0 ? msgs.slice(0, upTo + 1) : [],
+        complete: true,
+        gaps: [],
+        ancestors: [{ chat_id: c.parent.chat_id, title: p?.title ?? c.parent.chat_id, boundary_message_id: c.parent.message_id }],
       };
     }
     // Предложения этого Fork в родителе — со статусами, которые там им дали.
