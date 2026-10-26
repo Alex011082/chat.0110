@@ -8,7 +8,10 @@ import {
   isDecisionPath,
   isMessagePath,
   messagesDir,
+  parseProtocol,
   parsePrBody,
+  PROTOCOL_PATH,
+  type ChatStore,
   type AgentPrInput,
   type ApiErrorCode,
   type CommentInput,
@@ -323,14 +326,33 @@ export class GitHubClient {
     return prs.map((p) => toChatPull(repo, p)).find((p) => p?.chatId === chatId) ?? null;
   }
 
+  // Схема 2, если на этом ref лежит годный Chat/protocol.json. Иначе прежний chats/.
+  async chatStore(repo: RepoRef, ref: string): Promise<ChatStore> {
+    const text = await this.getFileText(repo, PROTOCOL_PATH, ref);
+    return parseProtocol(text) ? 2 : 1;
+  }
+
+  // Файл или каталог. 404 — нет. Каталог GitHub отдаёт массивом, это тоже «есть».
+  async exists(repo: RepoRef, path: string, ref: string): Promise<boolean> {
+    try {
+      await this.get(`${repoPath(repo)}/contents/${enc(path)}?ref=${encodeURIComponent(ref)}`);
+      return true;
+    } catch (e) {
+      if (e instanceof GitHubError && e.code === "not_found") return false;
+      throw e;
+    }
+  }
+
   // Файлы-сообщения чата на ветке чата или на конкретном коммите (ref = sha).
-  async listMessageFiles(repo: RepoRef, chatId: string, ref: string = branchForChat(chatId)): Promise<MessageEntry[]> {
-    return this.listEventFiles(repo, messagesDir(chatId), (p) => isMessagePath(chatId, p), ref);
+  async listMessageFiles(repo: RepoRef, chatId: string, ref: string = branchForChat(chatId), store?: ChatStore): Promise<MessageEntry[]> {
+    const version = store ?? (await this.chatStore(repo, ref));
+    return this.listEventFiles(repo, messagesDir(chatId, version), (p) => isMessagePath(chatId, p, version), ref);
   }
 
   // События решений чата (Этап 5): та же папка-на-событие, что у сообщений.
-  async listDecisionFiles(repo: RepoRef, chatId: string, ref: string = branchForChat(chatId)): Promise<MessageEntry[]> {
-    return this.listEventFiles(repo, decisionsDir(chatId), (p) => isDecisionPath(chatId, p), ref);
+  async listDecisionFiles(repo: RepoRef, chatId: string, ref: string = branchForChat(chatId), store?: ChatStore): Promise<MessageEntry[]> {
+    const version = store ?? (await this.chatStore(repo, ref));
+    return this.listEventFiles(repo, decisionsDir(chatId, version), (p) => isDecisionPath(chatId, p, version), ref);
   }
 
   // Решения с текстами. Блобы неизменны по sha и кешируются навсегда, поэтому

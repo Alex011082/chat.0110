@@ -15,6 +15,12 @@
         "@chat0110/chat-protocol": "workspace:*",
       },
     },
+    "apps/cli": {
+      "name": "@chat0110/cli",
+      "dependencies": {
+        "@chat0110/chat-protocol": "workspace:*",
+      },
+    },
     "apps/web": {
       "name": "@chat0110/web",
       "dependencies": {
@@ -42,6 +48,8 @@
     "@chat0110/api": ["@chat0110/api@workspace:apps/api"],
 
     "@chat0110/chat-protocol": ["@chat0110/chat-protocol@workspace:packages/chat-protocol"],
+
+    "@chat0110/cli": ["@chat0110/cli@workspace:apps/cli"],
 
     "@chat0110/web": ["@chat0110/web@workspace:apps/web"],
 

@@ -5,8 +5,14 @@ import {
   branchForChat,
   buildPrBody,
   buildTimeline,
+  CHAT_AGENTS_MD,
+  CHAT_AGENTS_PATH,
+  CHAT_CLAUDE_MD,
+  CHAT_CLAUDE_PATH,
   chatJsonPath,
   chatTitleFromPr,
+  conversationViolation,
+  type ChatStore,
   decisionPath,
   displayName,
   findForkCommit,
@@ -120,11 +126,13 @@ async function findPull(gh: GitHubClient, repo: RepoRef, chatId: string): Promis
 
 // Сырые данные одного чата для buildTimeline. Общая часть ленты и Fork:
 // точку ветвления ищем ровно в тех коммитах и комментариях, что видит человек.
-async function loadTimelineInput(gh: GitHubClient, repo: RepoRef, info: GhRepo, pull: ChatPull): Promise<{ input: TimelineInput; meta: ChatMeta | null }> {
+async function loadTimelineInput(gh: GitHubClient, repo: RepoRef, info: GhRepo, pull: ChatPull): Promise<{ input: TimelineInput; meta: ChatMeta | null; store: ChatStore }> {
   const { chatId } = pull;
+  const ref = branchForChat(chatId);
+  const store = await gh.chatStore(repo, ref);
   const [entries, decisions, commits, comments, reviews, reviewComments, agentPrs, chatJson] = await Promise.all([
-    gh.listMessageFiles(repo, chatId),
-    gh.getDecisionFiles(repo, chatId),
+    gh.listMessageFiles(repo, chatId, ref, store),
+    gh.getDecisionFiles(repo, chatId, ref),
     // У дочернего чата ветка растёт из ветки родителя: коммиты до точки Fork —
     // история родителя, она приходит отдельно, как inherited.
     gh.listBranchCommits(repo, info.default_branch, chatId, pull.parent?.commit_sha),
@@ -132,12 +140,13 @@ async function loadTimelineInput(gh: GitHubClient, repo: RepoRef, info: GhRepo, 
     gh.listReviews(repo, pull.number),
     gh.listReviewComments(repo, pull.number),
     gh.listAgentPulls(repo, chatId),
-    gh.getFileText(repo, chatJsonPath(chatId), branchForChat(chatId)),
+    gh.getFileText(repo, chatJsonPath(chatId, store), ref),
   ]);
   const files = await mapLimit(entries, 8, async (e) => ({ name: e.name, content: await gh.getBlob(repo, e.sha) }));
   return {
     input: { chatId, files, commits, comments, reviews, reviewComments, agentPrs, decisions },
     meta: chatJson === null ? null : parseChatJson(chatJson),
+    store,
   };
 }
 
@@ -203,7 +212,7 @@ async function outgoingOf(gh: GitHubClient, repo: RepoRef, chatId: string, paren
 
 export async function getTimeline(gh: GitHubClient, repo: RepoRef, chatId: string): Promise<TimelineResponse> {
   const [info, pull] = await findPull(gh, repo, chatId);
-  const [{ input, meta }, chats] = await Promise.all([loadTimelineInput(gh, repo, info, pull), gh.listChatPulls(repo)]);
+  const [{ input, meta, store }, chats] = await Promise.all([loadTimelineInput(gh, repo, info, pull), gh.listChatPulls(repo)]);
   const items = buildTimeline(input);
   // Источник истины — chat.json; тело PR — запасной путь (chat.json битый или его нет).
   const parent = meta?.parent ?? pull.parent;
@@ -224,6 +233,7 @@ export async function getTimeline(gh: GitHubClient, repo: RepoRef, chatId: strin
     inherited,
     decisions: foldFiles(input.decisions ?? []),
     outgoing,
+    chat_store: store,
   };
 }
 
@@ -315,31 +325,37 @@ export async function createChat(
     : null;
 
   let head: string;
-  let needAgents: boolean;
-  let needClaude: boolean;
+  let store: ChatStore = 1;
+  let seeded = false;
   if (fork) {
     // Протокол агентов проверяем на самом коммите ветвления: ветка ребёнка
     // — его потомок, и всё, чего там нет, ребёнку нужно положить самому.
     head = fork.baseSha;
-    [needAgents, needClaude] = await Promise.all([
-      gh.getFileText(repo, AGENTS_PATH, head).then((t) => t === null),
-      gh.getFileText(repo, CLAUDE_PATH, head).then((t) => t === null),
-    ]);
+    store = await gh.chatStore(repo, head);
   } else {
     try {
       head = await gh.getBranchHead(repo, base);
-      [needAgents, needClaude] = await Promise.all([
-        gh.getFileText(repo, AGENTS_PATH, base).then((t) => t === null),
-        gh.getFileText(repo, CLAUDE_PATH, base).then((t) => t === null),
-      ]);
+      store = await gh.chatStore(repo, base);
     } catch (e) {
       // Пустое репо Git Data API не принимает (409). Contents API умеет создать
       // первый коммит — кладём им протокол агентов, дальше обычный путь.
+      // Пустое репо ещё не подключено: пишем прежний chats/AGENTS.md.
       if (!isGh(e, 409, /empty/i)) throw e;
       head = (await gh.putFile(repo, AGENTS_PATH, { message: "chat0110: протокол для агентов", content: CHATS_AGENTS_MD })).commitSha;
-      needAgents = false;
-      needClaude = true;
+      seeded = true;
     }
+  }
+  const agentsPath = store === 2 ? CHAT_AGENTS_PATH : AGENTS_PATH;
+  const claudePath = store === 2 ? CHAT_CLAUDE_PATH : CLAUDE_PATH;
+  const agentsDoc = store === 2 ? CHAT_AGENTS_MD : CHATS_AGENTS_MD;
+  const claudeDoc = store === 2 ? CHAT_CLAUDE_MD : CHATS_CLAUDE_MD;
+  let needAgents = false;
+  let needClaude = seeded;
+  if (!seeded) {
+    [needAgents, needClaude] = await Promise.all([
+      gh.getFileText(repo, agentsPath, head).then((t) => t === null),
+      gh.getFileText(repo, claudePath, head).then((t) => t === null),
+    ]);
   }
   const baseTree = await gh.getCommitTree(repo, head);
 
@@ -351,10 +367,12 @@ export async function createChat(
   let chatId = "";
   for (let attempt = 1; ; attempt++) {
     chatId = newChatId(now, rand);
-    const files = [{ path: chatJsonPath(chatId), content: serializeChatJson({ schema_version: 1, chat_id: chatId, title, created_at: createdAt, created_by: login, parent: fork?.parent ?? null }) }];
-    if (needAgents) files.push({ path: AGENTS_PATH, content: CHATS_AGENTS_MD });
-    if (needClaude) files.push({ path: CLAUDE_PATH, content: CHATS_CLAUDE_MD });
-    if (firstMsg) files.push({ path: messagePath(chatId, firstMsg.id), content: serializeMessageFile(firstMsg) });
+    const files = [{ path: chatJsonPath(chatId, store), content: serializeChatJson({ schema_version: 1, chat_id: chatId, title, created_at: createdAt, created_by: login, parent: fork?.parent ?? null }) }];
+    if (needAgents) files.push({ path: agentsPath, content: agentsDoc });
+    if (needClaude) files.push({ path: claudePath, content: claudeDoc });
+    if (firstMsg) files.push({ path: messagePath(chatId, firstMsg.id, store), content: serializeMessageFile(firstMsg) });
+    const outside = conversationViolation(files.map((f) => f.path), store);
+    if (outside) throw forbidden(`Запись вне каталога чата: ${outside}`);
     const tree = await gh.createTree(repo, baseTree, files);
     const message = fork ? `chat(${chatId}): fork от ${fork.parent.chat_id}` : `chat(${chatId}): создан`;
     const commit = await gh.createCommit(repo, message, tree, [head]);
@@ -370,7 +388,7 @@ export async function createChat(
 
   const branch = branchForChat(chatId);
   const intro = fork?.parent.reason ?? first;
-  const body = buildPrBody({ chatId, ...(intro ? { intro } : {}), ...(point ? { parent: point } : {}) });
+  const body = buildPrBody({ chatId, ...(intro ? { intro } : {}), ...(point ? { parent: point } : {}), store });
   let pr: any;
   try {
     try {
@@ -466,18 +484,23 @@ export async function postMessage(
   const login = authorOf(ctx.user.login);
   const info = await gh.getRepo(repo);
   if (!info.can_push) throw forbidden(`Нет права на запись в ${info.full_name}`);
+  const branch = branchForChat(chatId);
+  const store = await gh.chatStore(repo, branch);
 
   for (let attempt = 1; ; attempt++) {
     const at = clock();
     const msg: MessageFile = { id: newMessageId(at, login, rand), author: login, created_at: isoSeconds(at), text };
     if (replyTo) msg.reply_to = replyTo;
+    const path = messagePath(chatId, msg.id, store);
+    const outside = conversationViolation([path], store);
+    if (outside) throw forbidden(`Запись вне каталога чата: ${outside}`);
     try {
       // Каждое сообщение — новый файл: параллельные авторы не конфликтуют по
       // содержимому, а 409 значит лишь «голова ветки сдвинулась» — повторяем.
-      const r = await gh.putFile(repo, messagePath(chatId, msg.id), {
+      const r = await gh.putFile(repo, path, {
         message: `chat(${chatId}): ${login}`,
         content: serializeMessageFile(msg),
-        branch: branchForChat(chatId),
+        branch,
       });
       const item: MessageItem = {
         kind: "message",
@@ -514,6 +537,7 @@ function orderItem(m: MessageItem): MessageItem {
 export async function acceptAgentPr(gh: GitHubClient, repo: RepoRef, chatId: string, number: number): Promise<AcceptAgentPrResponse> {
   if (!Number.isInteger(number) || number <= 0) throw badRequest("Номер PR — положительное целое");
   const branch = branchForChat(chatId);
+  const store = await gh.chatStore(repo, branch);
   const pr = await gh.getPull(repo, number);
   if (pr?.base?.ref !== branch) throw badRequest(`PR #${number} направлен не в ветку ${branch}`);
   if (pr.state !== "open" || pr.merged) throw badRequest(`PR #${number} уже закрыт или влит`);
@@ -521,7 +545,7 @@ export async function acceptAgentPr(gh: GitHubClient, repo: RepoRef, chatId: str
 
   const files = await gh.listPullFiles(repo, number);
   if (!files.length) throw badRequest(`В PR #${number} нет файлов`);
-  const foreign = files.filter((f) => f.status !== "added" || !isMessagePath(chatId, f.filename));
+  const foreign = files.filter((f) => f.status !== "added" || !isMessagePath(chatId, f.filename, store));
   if (foreign.length) {
     const list = foreign.slice(0, 3).map((f) => `${f.filename} (${f.status})`).join(", ");
     throw badRequest(`PR #${number} меняет не только новые сообщения чата: ${list}. Такой PR принимают вручную на GitHub.`);
@@ -612,6 +636,12 @@ function requireHumanVerdict(login: string, action: DecisionVerb): void {
   }
 }
 
+async function refuseDecisions(gh: GitHubClient, repo: RepoRef, ref: string): Promise<void> {
+  if ((await gh.chatStore(repo, ref)) === 2) {
+    throw forbidden("В подключённом репозитории чат не принимает решения. Текст PR — только обсуждение.");
+  }
+}
+
 async function requirePush(gh: GitHubClient, repo: RepoRef): Promise<void> {
   const info = await gh.getRepo(repo);
   if (!info.can_push) throw forbidden(`Нет права на запись в ${info.full_name}`);
@@ -625,6 +655,8 @@ const movedUnder = (e: unknown) =>
 // Несколько файлов одним коммитом: Contents API кладёт по файлу на коммит,
 // а «предложить и сразу принять» должно появиться в ветке атомарно.
 async function commitFiles(gh: GitHubClient, repo: RepoRef, branch: string, files: { path: string; content: string }[], message: string): Promise<string> {
+  const outside = conversationViolation(files.map((f) => f.path), 1);
+  if (outside) throw forbidden(`Запись вне каталога чата: ${outside}`);
   for (let attempt = 1; ; attempt++) {
     let head: string;
     try {
@@ -662,6 +694,7 @@ export async function createDecision(
   const login = authorOf(ctx.user.login);
   if (accept) requireHumanVerdict(login, "accept");
   await requirePush(gh, repo);
+  await refuseDecisions(gh, repo, branchForChat(chatId));
   if (p.supersedes) await requireDecision(gh, repo, chatId, p.supersedes);
 
   const id = newMessageId(now, login, rand);
@@ -713,6 +746,7 @@ export async function decisionAction(
   const login = authorOf(ctx.user.login);
   requireHumanVerdict(login, action);
   await requirePush(gh, repo);
+  await refuseDecisions(gh, repo, branchForChat(chatId));
 
   const events = (await gh.getDecisionFiles(repo, chatId))
     .map((f) => parseDecisionFile(f.name, f.content))
@@ -756,7 +790,9 @@ export async function proposeToParent(ctx: ChatCtx, repo: RepoRef, forkId: strin
   const p = normalizeProposal(req);
   const login = authorOf(ctx.user.login);
 
-  const [info, chatJson] = await Promise.all([gh.getRepo(repo), gh.getFileText(repo, chatJsonPath(forkId), branchForChat(forkId))]);
+  const forkRef = branchForChat(forkId);
+  const forkStore = await gh.chatStore(repo, forkRef);
+  const [info, chatJson] = await Promise.all([gh.getRepo(repo), gh.getFileText(repo, chatJsonPath(forkId, forkStore), forkRef)]);
   if (!info.can_push) throw forbidden(`Нет права на запись в ${info.full_name}`);
   // Как в ленте: источник истины — chat.json, тело PR — запасной путь.
   const meta = chatJson === null ? null : parseChatJson(chatJson);
@@ -767,6 +803,7 @@ export async function proposeToParent(ctx: ChatCtx, repo: RepoRef, forkId: strin
     parentId = pull?.parent?.chat_id;
   }
   if (!parentId) throw badRequest("Это не Fork — предлагать некому");
+  await refuseDecisions(gh, repo, branchForChat(parentId));
   if (p.supersedes) await requireDecision(gh, repo, parentId, p.supersedes);
 
   for (let attempt = 1; ; attempt++) {

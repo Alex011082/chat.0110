@@ -1,4 +1,4 @@
-import type { AppConfig, ChatSummary, Decision, GraphResponse, Me, MessageItem, RepoInfo, TimelineResponse } from "@chat0110/chat-protocol";
+import type { AppConfig, ChatActivation, ChatSummary, Decision, GraphResponse, Me, MessageItem, RepoInfo, TimelineResponse } from "@chat0110/chat-protocol";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, ApiFailure, errorText } from "../api.ts";
 import { navigate, storageGet, storageSet, useLayout, useNow, useRoute } from "../hooks.ts";
@@ -56,6 +56,8 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
   const phone = layout === "phone";
 
   const [repos, setRepos] = useState<RepoInfo[] | null>(null);
+  const [activation, setActivation] = useState<ChatActivation | null>(null);
+  const [activating, setActivating] = useState(false);
   const [reposError, setReposError] = useState<string | null>(null);
   const [chats, setChats] = useState<ChatSummary[] | null>(null);
   const [chatsError, setChatsError] = useState<string | null>(null);
@@ -360,7 +362,46 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
     openChat(c);
   };
 
-  const canCreate = !!repos?.some((r) => r.can_push);
+  useEffect(() => {
+    if (!repoFull) return;
+    let cancel = false;
+    setActivation(null);
+    void api()
+      .activation(repoFull)
+      .then((next) => {
+        if (!cancel) setActivation(next);
+      })
+      .catch(() => {
+        if (!cancel) setActivation(null);
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [repoFull]);
+
+  const connectRepo = useCallback(async () => {
+    if (!repoFull) return;
+    setActivating(true);
+    try {
+      setActivation(await api().activate(repoFull));
+      setToast(s.connect.done);
+    } catch (e) {
+      setToast(errorText(e));
+    } finally {
+      setActivating(false);
+    }
+  }, [repoFull]);
+
+  const mustConnect = !!activation && !activation.activated && !activation.legacy_chats && !activation.protocol_invalid;
+  const startChat = useCallback(() => {
+    if (mustConnect) {
+      setToast(s.connect.needFirst);
+      return;
+    }
+    setNewOpen(true);
+  }, [mustConnect]);
+
+  const canCreate = !!repos?.some((r) => r.can_push) && !mustConnect;
   const installUrl = config?.install_url ?? null;
   const meRef = useMemo(() => ({ login: me.login.toLowerCase(), display: me.login.toLowerCase() }), [me.login]);
   const local = (chatKey && outbox[chatKey]) || [];
@@ -377,7 +418,10 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       onRetry={() => void (reposError ? loadRepos() : loadChats())}
       selected={route.chatId}
       onOpen={openChat}
-      onNew={() => setNewOpen(true)}
+      onNew={startChat}
+      activation={activation}
+      activating={activating}
+      onActivate={() => void connectRepo()}
       installUrl={installUrl}
       now={now}
       phone={phone}
@@ -415,7 +459,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
         onFork={forkFromMessage}
         onDecide={decide}
         onDecision={onDecision}
-        onPropose={current.data.chat.parent ? openPropose : null}
+        onPropose={current.data.chat_store === 2 || !current.data.chat.parent ? null : openPropose}
       />
     );
   } else if (route.chatId && current.error && current.error.code !== "network" && current.error.code !== "rate_limited") {
@@ -444,7 +488,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
         text={repos && repos.length === 0 ? s.list.noRepos.text : s.empty.pickText}
         action={
           canCreate ? (
-            <ActionKey onClick={() => setNewOpen(true)}>{s.empty.create}</ActionKey>
+            <ActionKey onClick={startChat}>{s.empty.create}</ActionKey>
           ) : null
         }
       />
@@ -462,7 +506,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       decisions={current.data.decisions ?? []}
       outgoing={current.data.outgoing ?? []}
       onJump={() => setInfoOpen(false)}
-      onPropose={current.data.chat.parent ? openPropose : null}
+      onPropose={current.data.chat_store === 2 || !current.data.chat.parent ? null : openPropose}
     />
   ) : null;
 
@@ -491,7 +535,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       view={route.tree ? "tree" : "chats"}
       onChats={toList}
       onTree={toTree}
-      onNew={() => setNewOpen(true)}
+      onNew={startChat}
       onLogout={onLogout}
       canCreate={canCreate}
       bottom={bottom}
@@ -509,7 +553,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
         onSelect={selectInTree}
         onChatMode={treeChatMode}
         onFork={setForkTarget}
-        onNew={() => setNewOpen(true)}
+        onNew={startChat}
         canPush={!!repoInfo?.can_push}
         canCreate={canCreate}
         now={now}

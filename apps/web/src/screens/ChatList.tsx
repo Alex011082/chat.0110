@@ -1,4 +1,4 @@
-import type { ChatSummary, RepoInfo } from "@chat0110/chat-protocol";
+import type { ChatActivation, ChatSummary, RepoInfo } from "@chat0110/chat-protocol";
 import { useMemo, useState, type ReactNode } from "react";
 import { arrangeChatTree, type ChatTreeNode } from "../lib/chat.ts";
 import { agoShort, isFresh } from "../lib/time.ts";
@@ -17,6 +17,9 @@ interface ChatListProps {
   selected: string | null;
   onOpen: (chat: ChatSummary) => void;
   onNew: () => void;
+  activation: ChatActivation | null;
+  activating: boolean;
+  onActivate: () => void;
   installUrl: string | null;
   now: number;
   /** На телефоне сверху — знак 0110. */
@@ -54,6 +57,13 @@ export function ChatList(p: ChatListProps) {
           ))}
         </select>
       </label>
+
+      <Activation
+        activation={p.activation}
+        activating={p.activating}
+        canPush={!!current?.can_push}
+        onActivate={p.onActivate}
+      />
 
       <label className="flex flex-col gap-1.5">
         <span className="sr-only-text">{s.list.searchLabel}</span>
@@ -207,6 +217,40 @@ function Row({
         </span>
       </span>
     </a>
+  );
+}
+
+function Activation({
+  activation,
+  activating,
+  canPush,
+  onActivate,
+}: {
+  activation: ChatActivation | null;
+  activating: boolean;
+  canPush: boolean;
+  onActivate: () => void;
+}) {
+  if (!activation) return null;
+  const text = activation.protocol_invalid
+    ? s.connect.broken
+    : activation.activated
+      ? activation.legacy_chats
+        ? s.connect.onLegacy
+        : s.connect.on
+      : activation.legacy_chats
+        ? s.connect.legacy
+        : s.connect.off;
+  const showButton = canPush && !activation.protocol_invalid && activation.gaps.length > 0;
+  return (
+    <Plate className="flex flex-col items-start gap-2.5 px-4 py-3.5">
+      <p className="m-0 text-cap leading-[1.45] text-ink-2">{text}</p>
+      {showButton ? (
+        <Key onClick={onActivate} disabled={activating}>
+          {activating ? s.connect.working : s.connect.action}
+        </Key>
+      ) : null}
+    </Plate>
   );
 }
 

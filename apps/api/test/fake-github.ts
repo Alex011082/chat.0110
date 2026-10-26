@@ -16,6 +16,12 @@ export class FakeGitHub {
   readonly calls: Call[] = [];
   private routes: { method: string; match: string | RegExp; handler: Handler }[] = [];
 
+  // Чтение Chat/protocol.json добавлено во все операции чата. Старые тесты
+  // схему 2 не подключают: без явного маршрута это «файла нет», не ошибка теста.
+  constructor() {
+    this.on("GET", /\/contents\/Chat\/protocol\.json/, { status: 404, body: { message: "Not Found" } });
+  }
+
   // Путь сравнивается без query, если в шаблоне нет «?»; регулярка — с query.
   on(method: string, match: string | RegExp, handler: Handler | Reply): this {
     const h: Handler = typeof handler === "function" ? handler : () => handler;

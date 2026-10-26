@@ -1,4 +1,4 @@
-import { isAuthor, isChatId, parseMessageId } from "./ids.ts";
+import { isAuthor, isChatId, parseMessageId, type ChatStore } from "./ids.ts";
 import { validIso } from "./message-file.ts";
 
 // Машинные метаданные живут в HTML-комментарии: на GitHub они невидимы,
@@ -71,18 +71,30 @@ export function parsePrBody(body: string | null | undefined): PrMeta | null {
   return meta;
 }
 
-export function buildPrBody({ chatId, intro, parent }: { chatId: string; intro?: string; parent?: ForkPoint }): string {
+export function buildPrBody({
+  chatId,
+  intro,
+  parent,
+  store = 1,
+}: {
+  chatId: string;
+  intro?: string;
+  parent?: ForkPoint;
+  store?: ChatStore;
+}): string {
+  const agents = store === 2 ? "Chat/AGENTS.md" : "chats/AGENTS.md";
+  const messages = store === 2 ? `Chat/conversations/${chatId}/messages/` : `chats/${chatId}/messages/`;
   const parts = [];
   if (parent) {
     parts.push(`Fork из чата \`${parent.chat_id}\` от сообщения \`${parent.message_id}\` (коммит \`${parent.commit_sha.slice(0, 7)}\`).`);
   }
   if (intro?.trim()) parts.push(intro.trim());
   parts.push(
-    `**Агентам:** прочитайте \`chats/AGENTS.md\` и ответьте новым файлом в ` +
-      `\`chats/${chatId}/messages/\` в эту же ветку \`chat/${chatId}\`. ` +
+    `**Агентам:** прочитайте \`${agents}\` и ответьте новым файлом в ` +
+      `\`${messages}\` в эту же ветку \`chat/${chatId}\`. ` +
       `Если пушить сюда нельзя — свой PR в ветку чата или комментарий с блоком \`<!-- chat0110 … -->\`.`,
     "Этот PR — чат chat.0110. Его не сливают.",
-    `<!-- chat0110\nchat_id: ${chatId}\nschema_version: 1\n` +
+    `<!-- chat0110\nchat_id: ${chatId}\nschema_version: ${store === 2 ? 2 : 1}\n` +
       (parent
         ? `parent_chat_id: ${parent.chat_id}\nparent_message_id: ${parent.message_id}\nfork_commit_sha: ${parent.commit_sha}\n`
         : "") +

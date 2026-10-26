@@ -5,6 +5,7 @@ import {
   type ApiError,
   type ApiErrorCode,
   type AppConfig,
+  type ChatActivation,
   type ChatSummary,
   type ChatUpdatedEvent,
   type CreateChatRequest,
@@ -65,6 +66,8 @@ export interface Api {
   me(): Promise<Me>;
   config(): Promise<AppConfig>;
   repos(): Promise<RepoInfo[]>;
+  activation(repo: string): Promise<ChatActivation>;
+  activate(repo: string): Promise<ChatActivation>;
   chats(repo: string): Promise<ChatSummary[]>;
   timeline(repo: string, chatId: string): Promise<TimelineResponse>;
   createChat(req: CreateChatRequest): Promise<CreateChatResponse>;
@@ -183,6 +186,8 @@ export const httpApi: Api = {
   me: () => request<Me>("GET", "/api/me"),
   config: () => request<AppConfig>("GET", "/api/config"),
   repos: async () => listOf<RepoInfo>(await request("GET", "/api/repos"), "repos"),
+  activation: (repo) => request<ChatActivation>("GET", `/api/activation?repo=${encodeURIComponent(repo)}`),
+  activate: (repo) => request<ChatActivation>("POST", "/api/activation", { repo }),
   chats: async (repo) => listOf<ChatSummary>(await request("GET", `/api/chats?repo=${encodeURIComponent(repo)}`), "chats"),
   timeline: (repo, chatId) => request<TimelineResponse>("GET", chatPath(repo, chatId)),
   createChat: (req) => request<CreateChatResponse>("POST", "/api/chats", req),

@@ -474,6 +474,23 @@ export function createMockApi(mode: string): Api {
       await wait(200);
       return mode === "norepos" ? [] : structuredClone(db.repos);
     },
+    async activation(repo) {
+      const legacy = repo.toLowerCase() === REPO.toLowerCase();
+      return {
+        repo,
+        activated: legacy,
+        agents_doc: legacy,
+        legacy_chats: legacy,
+        protocol_invalid: false,
+        can_push: !db.readonly,
+        default_branch: "main",
+        gaps: legacy ? [] : ["Chat/protocol.json", "Chat/AGENTS.md", "Chat/CLAUDE.md", "Chat/index/.gitkeep", "Chat/conversations/.gitkeep", "Chat/forks/.gitkeep", "Chat/references/.gitkeep"],
+      };
+    },
+    async activate(repo) {
+      await wait(400);
+      return { ...(await this.activation(repo)), activated: true, agents_doc: true, gaps: [], created: [] };
+    },
     async chats(repo) {
       await wait(250);
       if (mode === "nochats" || repo.toLowerCase() !== REPO.toLowerCase()) return [];

@@ -80,7 +80,7 @@ export function ChatView(p: ChatViewProps) {
       onFork={p.onFork}
       decisions={p.data.decisions ?? []}
       outgoing={p.data.outgoing ?? []}
-      onDecide={p.onDecide}
+      onDecide={p.data.chat_store === 2 ? null : p.onDecide}
       onDecision={p.onDecision}
     />
   );

@@ -16,6 +16,25 @@ export interface AppConfig {
   install_url: string;
 }
 
+/** Состояние каталога Chat/ в репозитории продукта. Список репозиториев его не создаёт. */
+export interface ChatActivation {
+  repo: string;
+  /** В default-ветке лежит годный Chat/protocol.json. */
+  activated: boolean;
+  /** На месте главный документ Chat/AGENTS.md. */
+  agents_doc: boolean;
+  /** В репозитории есть прежний каталог chats/. Init его не переносит. */
+  legacy_chats: boolean;
+  /** Chat/protocol.json есть, но не читается как схема 2. Init его не перезаписывает. */
+  protocol_invalid: boolean;
+  can_push: boolean;
+  default_branch: string;
+  /** Файлы каркаса, которых ещё нет. */
+  gaps: string[];
+  /** Что дописал этот вызов подключения. Пусто у GET и у повторного POST. */
+  created?: string[];
+}
+
 export interface RepoInfo {
   full_name: string;
   owner: string;
@@ -86,7 +105,9 @@ export interface TimelineResponse {
   forks: ForkRef[];
   inherited: InheritedContext | null;
   // Все решения этого чата с текущими статусами (из chats/<id>/decisions/).
+  // В подключённом репозитории новых решений нет: chat_store === 2.
   decisions: Decision[];
+  chat_store?: 1 | 2;
   // Предложения, которые этот Fork отправил родителю, с их статусами в родителе.
   outgoing: Decision[];
 }
