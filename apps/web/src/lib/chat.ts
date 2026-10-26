@@ -94,8 +94,8 @@ export function arrangeChatTree(
 }
 
 /** Фраза, которую Саша отправляет Claude или Codex в их приложении. */
-export function agentLinkPhrase(url: string): string {
-  return s.info.agentPhrase(url);
+export function agentLinkPhrase(url: string, store?: 1 | 2): string {
+  return s.info.agentPhrase(url, store);
 }
 
 export interface OpenChatRef {

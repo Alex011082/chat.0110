@@ -1,4 +1,4 @@
-import type { ChatActivation, ChatSummary, RepoInfo } from "@chat0110/chat-protocol";
+import type { ChatActivation, ChatMigration, ChatSummary, RepoInfo } from "@chat0110/chat-protocol";
 import { useMemo, useState, type ReactNode } from "react";
 import { arrangeChatTree, type ChatTreeNode } from "../lib/chat.ts";
 import { agoShort, isFresh } from "../lib/time.ts";
@@ -20,6 +20,9 @@ interface ChatListProps {
   activation: ChatActivation | null;
   activating: boolean;
   onActivate: () => void;
+  migration: ChatMigration | null;
+  migrating: boolean;
+  onMigrate: () => void;
   installUrl: string | null;
   now: number;
   /** На телефоне сверху — знак 0110. */
@@ -63,6 +66,9 @@ export function ChatList(p: ChatListProps) {
         activating={p.activating}
         canPush={!!current?.can_push}
         onActivate={p.onActivate}
+        migration={p.migration}
+        migrating={p.migrating}
+        onMigrate={p.onMigrate}
       />
 
       <label className="flex flex-col gap-1.5">
@@ -225,29 +231,45 @@ function Activation({
   activating,
   canPush,
   onActivate,
+  migration,
+  migrating,
+  onMigrate,
 }: {
   activation: ChatActivation | null;
   activating: boolean;
   canPush: boolean;
   onActivate: () => void;
+  migration: ChatMigration | null;
+  migrating: boolean;
+  onMigrate: () => void;
 }) {
   if (!activation) return null;
+  const pending = migration?.items.some((item) => item.status === "pending") ?? false;
+  const moved = migration?.items.some((item) => item.status === "migrated") ?? false;
+  const blocked = migration?.items.some((item) => item.status === "conflict" || item.status === "protocol_invalid") ?? false;
+  const idleLegacy = activation.activated ? s.connect.onLegacy : s.connect.legacy;
+  const legacyText = blocked ? s.migrate.conflict : pending ? s.migrate.pending : moved ? s.migrate.done : idleLegacy;
   const text = activation.protocol_invalid
     ? s.connect.broken
-    : activation.activated
-      ? activation.legacy_chats
-        ? s.connect.onLegacy
-        : s.connect.on
-      : activation.legacy_chats
-        ? s.connect.legacy
+    : activation.legacy_chats
+      ? legacyText
+      : activation.activated
+        ? s.connect.on
         : s.connect.off;
-  const showButton = canPush && !activation.protocol_invalid && activation.gaps.length > 0;
+  const showConnect = canPush && !activation.protocol_invalid && activation.gaps.length > 0;
+  const showMigrate = canPush && pending;
+  const busy = activating || migrating;
   return (
     <Plate className="flex flex-col items-start gap-2.5 px-4 py-3.5">
       <p className="m-0 text-cap leading-[1.45] text-ink-2">{text}</p>
-      {showButton ? (
-        <Key onClick={onActivate} disabled={activating}>
+      {showConnect ? (
+        <Key onClick={onActivate} disabled={busy}>
           {activating ? s.connect.working : s.connect.action}
+        </Key>
+      ) : null}
+      {showMigrate ? (
+        <Key onClick={onMigrate} disabled={busy}>
+          {migrating ? s.migrate.working : s.migrate.action}
         </Key>
       ) : null}
     </Plate>

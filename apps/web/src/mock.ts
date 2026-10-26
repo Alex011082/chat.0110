@@ -491,6 +491,13 @@ export function createMockApi(mode: string): Api {
       await wait(400);
       return { ...(await this.activation(repo)), activated: true, agents_doc: true, gaps: [], created: [] };
     },
+    async migration(repo) {
+      return { repo, can_push: !db.readonly, items: [] };
+    },
+    async migrate(repo) {
+      await wait(400);
+      return this.migration(repo);
+    },
     async chats(repo) {
       await wait(250);
       if (mode === "nochats" || repo.toLowerCase() !== REPO.toLowerCase()) return [];

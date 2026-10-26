@@ -26,10 +26,12 @@ interface InfoProps {
   /** Переход к карточке в ленте: на телефоне и планшете панель закрывается. */
   onJump: () => void;
   onPropose: (() => void) | null;
+  /** 2 — инструкция в Chat/AGENTS.md. Без поля чат ещё на схеме 1. */
+  store?: 1 | 2;
 }
 
 /** Правая колонка: участники, решения, ветвления, ссылка для агента, паспорт чата. */
-export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, decisions, outgoing, onJump, onPropose }: InfoProps) {
+export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, decisions, outgoing, onJump, onPropose, store }: InfoProps) {
   const counts = useMemo(() => countTimeline(items), [items]);
   const owner = chat.created_by.toLowerCase();
   const participants = useMemo(
@@ -40,7 +42,7 @@ export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, de
       ),
     [chat.participants, owner],
   );
-  const phrase = agentLinkPhrase(chat.url);
+  const phrase = agentLinkPhrase(chat.url, store);
   const { copied, failed, copy } = useCopy();
 
   return (

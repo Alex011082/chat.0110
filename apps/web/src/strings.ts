@@ -98,6 +98,15 @@ export const s = {
     needFirst: "Сначала подключите Chat к проекту",
   },
 
+  migrate: {
+    pending: "Старые чаты ещё в chats/. Перенос копирует их в Chat/ и не меняет номер PR.",
+    done: "Старые чаты скопированы в Chat/. Папка chats/ и прежние ссылки на месте.",
+    conflict: "Перенос остановился: в Chat/ уже лежит другая копия. Файл не перезаписан.",
+    action: "Перенести чаты в Chat",
+    working: "Переносим…",
+    toast: "Чаты перенесены в Chat",
+  },
+
   empty: {
     pick: "Выбери чат слева",
     pickText: "Или создай новый — появятся ветка, draft PR и правила для агентов.",
@@ -205,8 +214,10 @@ export const s = {
     humanWrote: (when: string) => `писал ${when}`,
     agentLink: "Ссылка для агента",
     agentLinkHelp: "Отправь Claude или Codex в их приложении — они прочитают чат и ответят в эту ветку.",
-    agentPhrase: (url: string) =>
-      `Прочитай чат ${url} по правилам chats/AGENTS.md и ответь новым файлом в ту же ветку.`,
+    /** 2 — репозиторий подключён, инструкция в Chat/. Иначе прежний chats/. */
+    agentsDoc: (store?: 1 | 2) => (store === 2 ? "Chat/AGENTS.md" : "chats/AGENTS.md"),
+    agentPhrase: (url: string, store?: 1 | 2) =>
+      `Прочитай чат ${url} по правилам ${s.info.agentsDoc(store)} и ответь новым файлом в ту же ветку.`,
     copy: "Скопировать",
     about: "О чате",
     createdBy: "Создал",
@@ -413,7 +424,6 @@ export const s = {
     pr: "Pull request",
     prValue: "draft · метка chat0110",
     rules: "Правила для агентов",
-    rulesValue: "chats/AGENTS.md",
     create: "Создать чат",
     creating: "Создаю…",
     noWritable: "Нет репозиториев с правом записи — создать чат негде.",
