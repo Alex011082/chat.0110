@@ -9,7 +9,7 @@ export interface Span { start: number; end: number; category: Category }
 export interface CleanText { text: string; counts: Partial<Record<Category, number>> }
 export type EntityScanner = (text: string) => Promise<Span[]>;
 const MARKER = /\[(SECRET|EMAIL|PHONE|DOCUMENT|CARD|BANK_ACCOUNT|PERSON|ADDRESS)_(\d+)\]/g;
-const CONTENT = new Set(["text", "title", "body", "reason", "intro", "prompt", "answer", "diff_hunk", "excerpt", "summary", "path"]);
+const CONTENT = new Set(["text", "title", "body", "reason", "intro", "prompt", "answer", "diff_hunk", "excerpt", "summary", "path", "gaps"]);
 const METADATA = new Set(["id", "author", "actor", "created_by", "created_at", "updated_at", "chat_id", "reply_to", "decision", "source_messages", "from_chat", "supersedes", "superseded_by", "decided_by", "decided_at", "schema_version", "commit_sha", "head_sha", "message_id", "boundary_message_id", "origin_chat_id", "kind", "source", "state", "status", "action", "repo", "url", "branch"]);
 const MODEL_NAMES = new Set(Object.values(MENTION_ALIASES).flat().map(normalizeMention));
 const overlaps = (a: Span, b: Span) => a.start < b.end && b.start < a.end;
@@ -57,7 +57,7 @@ function rules(text: string): Span[] {
   add(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, "SECRET");
   add(/\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp):\/\/[^\s<>"'`]+/gi, "SECRET");
   add(/\bhttps?:\/\/([^\s/@]+:[^\s/@]+)@/gi, "SECRET", 1);
-  const envName = String.raw`(?<![\p{L}\p{N}_])(?:[A-Z0-9_]{1,120}_)?(?:API_KEY|PASSWORD|PASSWD|TOKEN|SECRET_ACCESS_KEY|SECRET_KEY|CLIENT_SECRET|PRIVATE_KEY|AUTH_TOKEN)(?:_[A-Z0-9]{1,32})?`;
+  const envName = String.raw`(?<![\p{L}\p{N}_])(?:[A-Z0-9_]{1,120}_)?(?:API_KEY|PASSWORD|PASSWD|TOKEN|SECRET_ACCESS_KEY|SECRET_KEY|CLIENT_SECRET|PRIVATE_KEY|AUTH_TOKEN|SECRET)(?:_[A-Z0-9]{1,32})?`;
   add(new RegExp(envName + String.raw`\s*["']?\s*[:=]\s*"([^"\n]{1,2000})"`, "giu"), "SECRET", 1);
   add(new RegExp(envName + String.raw`\s*["']?\s*[:=]\s*'([^'\n]{1,2000})'`, "giu"), "SECRET", 1);
   add(new RegExp(envName + String.raw`\s*["']?\s*[:=]\s*["']?([^\s"'\x60&,;<>}]+)`, "giu"), "SECRET", 1);

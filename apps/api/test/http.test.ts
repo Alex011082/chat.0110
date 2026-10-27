@@ -56,6 +56,20 @@ const post = (path: string, body: unknown, headers: Record<string, string> = {})
   new Request(PUBLIC + path, { method: "POST", body: JSON.stringify(body), headers: { origin: PUBLIC, "content-type": "application/json", ...headers } });
 
 describe("маршруты", () => {
+  test("повтор обычного сообщения с request_id не дублирует GitHub", async () => {
+    const { app, cookie, fake } = await setup();
+    const files = new Map<string, string>();
+    fake.on("GET", /\/contents\/chats\/.+\/messages\//, (c) => files.has(c.url.pathname) ? { body: { content: files.get(c.url.pathname), encoding: "base64" } } : { status: 404 });
+    fake.on("PUT", /\/contents\/chats\/.+\/messages\//, (c) => { files.set(c.url.pathname, c.body.content); return { status: 201, body: { commit: { sha: "same", html_url: "url" } } }; });
+    const path = "/api/chats/Alex011082/chat.0110/20261023-k7q2/messages";
+    const payload = { text: "private@example.org", request_id: "privacy-plain-123" };
+    const a = await app(post(path, payload, { cookie }));
+    const b = await app(post(path, payload, { cookie }));
+    expect(a.status).toBe(201); expect(b.status).toBe(201);
+    expect(files.size).toBe(1);
+    expect((await a.json()).item.id).toBe((await b.json()).item.id);
+    expect((await app(post(path, { ...payload, text: "Другой текст" }, { cookie }))).status).toBe(409);
+  });
   test("сбой защиты возвращает 503 до очереди и записи GitHub", async () => {
     const { app, cookie, fake, dispatch } = await setup({ privacy: new Privacy(async () => { throw new Error("private scanner detail"); }) });
     const response = await app(post("/api/chats/Alex011082/chat.0110/20261023-k7q2/messages", { text: "@чатжпт Проверка", request_id: "privacy-failure-1" }, { cookie }));

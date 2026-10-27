@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { McpOAuth } from "./mcp-oauth.ts";
 import { McpEvents } from "./mcp-events.ts";
 import { createRemoteMcp } from "./remote-mcp.ts";
-import { mentionRoute, newMessageId, canonicalMention } from "@chat0110/chat-protocol";
+import { mentionRoute, canonicalMention } from "@chat0110/chat-protocol";
 import { DispatchStore } from "./dispatch.ts";
 // Роутер на голом Bun.serve: маршрутов мало, и рукописная таблица проще
 // фреймворка. Каждый параметр из адреса проверяется регуляркой ДО того,
@@ -31,6 +31,7 @@ import {
   getTimeline,
   listChats,
   postMessage,
+  requireOpenChat,
   proposeToParent,
   type ChatCtx,
 } from "./chats.ts";
@@ -294,22 +295,21 @@ export async function createApp(deps: AppDeps): Promise<App> {
             throw badRequest("Нужен один @адресат и не больше одного @@участника");
           }
           if (typeof body.text !== "string" || !body.text.trim() || body.text.length > 60_000) throw badRequest("Нужен текст до 60000 знаков");
+          if ((route.length || body.request_id !== undefined) && (typeof body.request_id !== "string" || !/^[A-Za-z0-9_-]{8,80}$/.test(body.request_id))) throw badRequest("Нужен request_id для сообщения");
           body.text = (await privacy.scan(body.text.replace(/\r\n?/g, "\n").trim())).text;
           let delivery: { id: string; author: string } | undefined;
           let chainId: string | undefined;
           if (route.length) {
             if (typeof body.request_id !== "string" || !/^[A-Za-z0-9_-]{8,80}$/.test(body.request_id))
               throw badRequest("Нужен request_id для адресного сообщения");
-            const timeline = await getTimeline(gh, repo, chatId, privacy);
-            if (!timeline.chat.can_push || timeline.chat.state !== "open")
-              throw forbidden("Чат закрыт или доступен только для чтения");
+            await requireOpenChat(gh, repo, chatId);
             if (route.some((alias) => canonicalMention(alias) === "chatgpt"))
               dispatch.ensureCloud(session.uid, `${repo.owner}/${repo.name}`, chatId);
             const routeIds = dispatch.resolve(session.uid, `${repo.owner}/${repo.name}`, chatId, route);
             chainId = `${session.uid}:${body.request_id}`;
             const old = dispatch.chain(chainId, session.uid);
             const author = session.login.toLowerCase();
-            delivery = { id: old?.message_id ?? newMessageId(new Date(), author), author };
+            delivery = dispatch.preparePublication(body.request_id, session.uid, `${repo.owner}/${repo.name}`, chatId, author, body.text as string, body.reply_to, old?.message_id);
             dispatch.enqueue(
               chainId,
               session.uid,
@@ -321,6 +321,11 @@ export async function createApp(deps: AppDeps): Promise<App> {
               true,
             );
             if (old?.status === "cancelled") throw new HttpError(409, "conflict", "Цепочка отменена");
+          }
+          if (!route.length && body.request_id !== undefined) {
+            if (typeof body.request_id !== "string" || !/^[A-Za-z0-9_-]{8,80}$/.test(body.request_id)) throw badRequest("Неверный request_id");
+            if (!(await gh.getRepo(repo)).can_push) throw forbidden("Нет права записи");
+            delivery = dispatch.preparePublication(body.request_id, session.uid, `${repo.owner}/${repo.name}`, chatId, session.login.toLowerCase(), body.text as string, body.reply_to);
           }
           const out: PostMessageResponse = {
             item: await postMessage(ctx, repo, chatId, { text: body.text, reply_to: body.reply_to }, delivery),
@@ -413,13 +418,12 @@ export async function createApp(deps: AppDeps): Promise<App> {
     if (path === "/api/agent/register") {
       const repo = repoFromParam(body.repo);
       if (typeof body.chat_id !== "string" || !isChatId(body.chat_id)) throw badRequest("Неверный чат");
-      const data = await getTimeline(gh, repo, body.chat_id, privacy);
-      if (!data.chat.can_push || data.chat.state !== "open") throw forbidden("Чат закрыт или недоступен для записи");
+      const info = await requireOpenChat(gh, repo, body.chat_id);
       return json(
         200,
         dispatch.register(
           user.id,
-          data.chat.repo,
+          info.full_name,
           body.chat_id,
           String(body.session_id ?? ""),
           String(body.alias ?? ""),
@@ -467,8 +471,8 @@ export async function createApp(deps: AppDeps): Promise<App> {
       // Одинаковый id и сохранённый текст делают повтор после обрыва безопасным.
       body.text = (await privacy.scan(body.text.replace(/\r\n?/g, "\n").trim())).text;
       dispatch.prepareAnswer(task.id, session.id, String(body.claim), body.text as string);
-      const timeline = await getTimeline(gh, repo, session.chat, privacy);
-      if (timeline.chat.state !== "open") throw new HttpError(409, "conflict", "Чат закрыт");
+      const pull = await gh.findChatPull(repo, session.chat);
+      if (!pull || pull.state !== "open") throw new HttpError(409, "conflict", "Чат закрыт");
       const item = await postMessage(
         ctx,
         repo,
@@ -487,6 +491,9 @@ export async function createApp(deps: AppDeps): Promise<App> {
     const url = new URL(req.url);
     const path = url.pathname;
     const method = req.method;
+    // Большой текст проверяется локально, до побочных эффектов. SSE ниже
+    // отдельно снимает таймаут; остальных клиентов не обрываем через 60 с.
+    if ((path.startsWith("/api/") && path !== "/api/events") || path === "/mcp") server?.timeout?.(req, 240);
     try {
       const oauthResponse = await oauth.handle(req);
       if (oauthResponse) return oauthResponse;

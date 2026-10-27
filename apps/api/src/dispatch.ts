@@ -1,6 +1,6 @@
-import { canonicalMention, resolveMention, isAuthor } from "@chat0110/chat-protocol";
+import { canonicalMention, resolveMention, isAuthor, newMessageId } from "@chat0110/chat-protocol";
 import { Database } from "bun:sqlite";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import type { AgentSession, DispatchChain, DispatchView } from "@chat0110/chat-protocol";
 import { badRequest, forbidden, HttpError, notFound } from "./errors.ts";
 
@@ -48,6 +48,7 @@ export class DispatchStore {
   constructor(path: string | Database) {
     this.db = typeof path === "string" ? new Database(path, { create: true }) : path;
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
+      CREATE TABLE IF NOT EXISTS publications (request_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, message_id TEXT NOT NULL, author TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, uid INTEGER NOT NULL, repo TEXT NOT NULL, chat TEXT NOT NULL, external TEXT NOT NULL, alias TEXT NOT NULL, name TEXT NOT NULL, author TEXT NOT NULL, model TEXT NOT NULL, seen INTEGER NOT NULL, UNIQUE(uid,repo,chat,external), UNIQUE(uid,repo,chat,alias));
       CREATE TABLE IF NOT EXISTS chains (id TEXT PRIMARY KEY, uid INTEGER NOT NULL, repo TEXT NOT NULL, chat TEXT NOT NULL, message_id TEXT NOT NULL, prompt TEXT NOT NULL, route TEXT NOT NULL, step INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, chain_id TEXT NOT NULL, session_id TEXT NOT NULL, step INTEGER NOT NULL, status TEXT NOT NULL, claim TEXT, reply_to TEXT NOT NULL, answer_id TEXT NOT NULL, text TEXT, started INTEGER, UNIQUE(chain_id,step));`);
@@ -55,6 +56,22 @@ export class DispatchStore {
       this.db.exec("ALTER TABLE sessions ADD COLUMN auto_enabled INTEGER NOT NULL DEFAULT 1");
     if (!this.db.query<{ name: string }, []>("PRAGMA table_info(sessions)").all().some(column => column.name === "auto_generation"))
       this.db.exec("ALTER TABLE sessions ADD COLUMN auto_generation INTEGER NOT NULL DEFAULT 0");
+  }
+  preparePublication(requestId: string, uid: number, repo: string, chat: string, author: string, text: string, replyTo: unknown, legacyId?: string): { id: string; author: string } {
+    if (!isAuthor(author)) throw badRequest("Логин не подходит как автор сообщения");
+    const id = `${uid}:${requestId}`;
+    // Только отпечаток уже очищенного содержимого. Исходник здесь не хранится.
+    const fingerprint = createHash("sha256").update(JSON.stringify([repo.toLowerCase(), chat, text, replyTo || null])).digest("hex");
+    return this.db.transaction(() => {
+      const old = this.db.query<{ fingerprint: string; message_id: string; author: string }, [string]>("SELECT * FROM publications WHERE request_id=?").get(id);
+      if (old) {
+        if (old.fingerprint !== fingerprint) throw new HttpError(409, "conflict", "Повтор запроса с другим содержимым");
+        return { id: old.message_id, author: old.author };
+      }
+      const messageId = legacyId ?? newMessageId(new Date(), author);
+      this.db.query("INSERT INTO publications VALUES (?,?,?,?)").run(id, fingerprint, messageId, author);
+      return { id: messageId, author };
+    })();
   }
   ensureCloud(uid:number,repo:string,chat:string):SessionRow {
     const external=`cloud:chatgpt:${uid}`;

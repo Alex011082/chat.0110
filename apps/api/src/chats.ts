@@ -129,6 +129,13 @@ async function findPull(gh: GitHubClient, repo: RepoRef, chatId: string): Promis
   return [info, pull];
 }
 
+/** Проверка прав не должна заново прогонять всю историю через модель. */
+export async function requireOpenChat(gh: GitHubClient, repo: RepoRef, chatId: string): Promise<GhRepo> {
+  const [info, pull] = await findPull(gh, repo, chatId);
+  if (!info.can_push || pull.state !== "open") throw forbidden("Чат закрыт или доступен только для чтения");
+  return info;
+}
+
 // Сырые данные одного чата для buildTimeline. Общая часть ленты и Fork:
 // точку ветвления ищем ровно в тех коммитах и комментариях, что видит человек.
 async function loadTimelineInput(gh: GitHubClient, repo: RepoRef, info: GhRepo, pull: ChatPull): Promise<{ input: TimelineInput; meta: ChatMeta | null; store: ChatStore }> {

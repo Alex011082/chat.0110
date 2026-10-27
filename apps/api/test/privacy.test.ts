@@ -42,7 +42,7 @@ describe("защита данных", () => {
     expect(result.text).toBe("[SECRET_1]\n[SECRET_2]");
   });
   test("сканирование объекта очищает содержимое, но сохраняет протокол", async () => {
-    const result = await rules.object({ text: key, title: "anna@example.org", author: "claude", reply_to: "m1", prompt: key, nested: [{ diff_hunk: key }] });
+    const result = await rules.object({ text: key, title: "anna@example.org", author: "claude", reply_to: "m1", prompt: key, nested: [{ diff_hunk: key }], gaps: [key] });
     expect(result.author).toBe("claude");
     expect(result.reply_to).toBe("m1");
     expect(JSON.stringify(result)).not.toContain(key);
@@ -73,8 +73,8 @@ describe("защита данных", () => {
     expect(performance.now() - at).toBeLessThan(2000);
   });
   test("переменные окружения с префиксом очищаются, включая значения в кавычках", async () => {
-    const result = await rules.scan('DATABASE_PASSWORD=private-db-value\nXAI_API_KEY="private xai value"\nAWS_SECRET_ACCESS_KEY=private-aws-value\nGITHUB_TOKEN=private-github-value');
-    expect(result.text).toBe('DATABASE_PASSWORD=[SECRET_1]\nXAI_API_KEY="[SECRET_2]"\nAWS_SECRET_ACCESS_KEY=[SECRET_3]\nGITHUB_TOKEN=[SECRET_4]');
+    const result = await rules.scan('DATABASE_PASSWORD=private-db-value\nXAI_API_KEY="private xai value"\nAWS_SECRET_ACCESS_KEY=private-aws-value\nGITHUB_TOKEN=private-github-value\nGITHUB_WEBHOOK_SECRET=private-webhook-value');
+    expect(result.text).toBe('DATABASE_PASSWORD=[SECRET_1]\nXAI_API_KEY="[SECRET_2]"\nAWS_SECRET_ACCESS_KEY=[SECRET_3]\nGITHUB_TOKEN=[SECRET_4]\nGITHUB_WEBHOOK_SECRET=[SECRET_5]');
   });
   test("пересекающиеся PERSON охватывают всё найденное имя", async () => {
     const privacy = new Privacy(async () => [{ start: 0, end: 10, category: "PERSON" }, { start: 5, end: 19, category: "PERSON" }]);

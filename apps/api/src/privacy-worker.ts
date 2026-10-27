@@ -5,6 +5,7 @@ import type { Span } from "./privacy.ts";
 
 // Один процесс под существующим systemd-сервисом: текст не уходит в сеть.
 export class LocalEntities {
+  constructor(private options: { python?: string; script?: string; timeoutMs?: number; startupTimeoutMs?: number } = {}) {}
   private child?: ChildProcessWithoutNullStreams;
   private pending?: { resolve: (spans: Span[]) => void; reject: () => void };
   private tail: Promise<unknown> = Promise.resolve();
@@ -17,7 +18,7 @@ export class LocalEntities {
     const work = this.tail.then(async () => {
       await this.start();
       return new Promise<Span[]>((resolve, reject) => {
-        const timer = setTimeout(() => { this.stop(); reject(new Error("scanner timeout")); }, 30_000);
+        const timer = setTimeout(() => { this.stop(); reject(new Error("scanner timeout")); }, this.options.timeoutMs ?? 90_000);
         this.pending = { resolve: (spans) => { clearTimeout(timer); resolve(spans); }, reject: () => { clearTimeout(timer); reject(new Error("scanner unavailable")); } };
         this.child!.stdin.write(JSON.stringify({ text }) + "\n");
       });
@@ -29,7 +30,7 @@ export class LocalEntities {
   private start(): Promise<void> {
     if (this.ready) return this.ready;
     this.ready = new Promise<void>((resolve, reject) => {
-      const child = spawn(process.env.CHAT0110_PRIVACY_PYTHON ?? "/var/lib/chat0110/privacy-venv/bin/python", [fileURLToPath(new URL("../privacy/worker.py", import.meta.url))], {
+      const child = spawn(this.options.python ?? process.env.CHAT0110_PRIVACY_PYTHON ?? "/var/lib/chat0110/privacy-venv/bin/python", [this.options.script ?? fileURLToPath(new URL("../privacy/worker.py", import.meta.url))], {
         env: {
           PATH: process.env.PATH ?? "/usr/bin:/bin",
           HF_HOME: process.env.HF_HOME ?? "/var/lib/chat0110/privacy-cache",
@@ -41,7 +42,7 @@ export class LocalEntities {
       this.child = child;
       // Библиотеки могут печатать исключения с фрагментами ввода: stderr не журналируем.
       child.stderr.resume();
-      const timer = setTimeout(() => { this.stop(); reject(new Error("scanner startup timeout")); }, 120_000);
+      const timer = setTimeout(() => { this.stop(); reject(new Error("scanner startup timeout")); }, this.options.startupTimeoutMs ?? 120_000);
       const fail = () => { clearTimeout(timer); if (this.child === child) this.stop(); reject(new Error("scanner unavailable")); };
       child.on("error", fail);
       child.on("exit", fail);

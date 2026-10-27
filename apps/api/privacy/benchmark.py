@@ -12,6 +12,9 @@ cases = [
     ("en", "Contact John Smith at 123 Main Street, London SW1A 1AA.", ["John Smith", "123 Main Street", "SW1A 1AA"]),
     ("unicode", "👋 John Smith lives at 42 Baker Street, London.", ["John Smith", "42 Baker Street"]),
 ]
+if "--long" in sys.argv:
+    long_text = (("A synthetic example without private details. " * 100) + "Contact John Smith at 123 Main Street, London SW1A 1AA.\n") * 14
+    cases.append(("long-59000", long_text[:59000], ["John Smith", "123 Main Street", "SW1A 1AA"]))
 env = dict(os.environ, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", PYTHONDONTWRITEBYTECODE="1", TOKENIZERS_PARALLELISM="false")
 started = time.monotonic()
 worker = subprocess.Popen([sys.executable, str(Path(__file__).with_name("worker.py"))], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=env)

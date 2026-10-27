@@ -88,6 +88,7 @@ export function Composer(p: ComposerProps) {
       area.current?.setSelectionRange(next, next);
     });
   };
+  const checkingHint = sending && text.length > 8000 ? <p role="status" className="m-0 text-cap text-ink-2">{s.locale === "en" ? "Checking a large text locally. This can take up to two minutes." : "Большой текст проверяется локально. Это может занять до двух минут."}</p> : null;
   const routePanel = (
     <div id="mention-help" className="flex flex-col gap-1.5 text-cap text-ink-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -274,6 +275,7 @@ export function Composer(p: ComposerProps) {
       >
         {replyChip}
         {routePanel}
+        {checkingHint}
         <PrivacyPanel chatKey={p.chatKey} text={text} onApply={update} />
         {!p.canPush ? <p className="m-0 px-1 text-cap text-ink-2">{s.composer.readOnly}</p> : null}
         <div className="flex items-end gap-2.5">
@@ -292,6 +294,7 @@ export function Composer(p: ComposerProps) {
     >
       {replyChip}
       {routePanel}
+      {checkingHint}
       {field}
       <PrivacyPanel chatKey={p.chatKey} text={text} onApply={update} />
       <div className="flex flex-wrap items-center justify-between gap-2.5">

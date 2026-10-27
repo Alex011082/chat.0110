@@ -2,7 +2,7 @@ import { defaultPrivacy, type Privacy } from "./privacy.ts";
 import { canonicalMention, isChatId, type DispatchView } from "@chat0110/chat-protocol";
 import type { Config } from "./config.ts";
 import { GitHubClient, type Fetch, type RepoRef } from "./github.ts";
-import { getTimeline, postMessage } from "./chats.ts";
+import { getTimeline, postMessage, requireOpenChat } from "./chats.ts";
 import { HttpError, badRequest, forbidden, notFound } from "./errors.ts";
 import type { DispatchStore } from "./dispatch.ts";
 import type { McpOAuth, McpPrincipal } from "./mcp-oauth.ts";
@@ -168,18 +168,16 @@ export function createRemoteMcp(o: Options) {
       const repo = repoRef(args.repo),
         chat = String(args.chat_id);
       if (!isChatId(chat)) throw badRequest("Неверный чат");
-      const timeline = await getTimeline(gh, repo, chat, privacy);
-      if (!timeline.chat.can_push || timeline.chat.state !== "open")
-        throw forbidden("Чат закрыт или доступен только для чтения");
+      const info = await requireOpenChat(gh, repo, chat);
       const author = canonicalMention(String(args.author));
       const alias = String(args.alias ?? author),
         name = String(args.name ?? author);
       const session =
         author === "chatgpt"
-          ? dispatch.ensureCloud(uid, timeline.chat.repo, chat)
+          ? dispatch.ensureCloud(uid, info.full_name, chat)
           : dispatch.register(
               uid,
-              timeline.chat.repo,
+              info.full_name,
               chat,
               `remote:${p.connectionId}:${alias}`,
               alias,
