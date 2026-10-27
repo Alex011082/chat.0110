@@ -92,3 +92,26 @@ describe("защита данных", () => {
     expect(JSON.parse(safe).chat_id).toBe("20261027-abcd");
   });
 });
+
+test("одновременное чтение одной истории запускает одну проверку текста", async () => {
+  let calls = 0;
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  const privacy = new Privacy(async () => { calls++; await gate; return []; });
+  const first = privacy.scan("Одна история");
+  const second = privacy.scan("Одна история");
+  finish();
+  const [a, b] = await Promise.all([first, second]);
+  expect(calls).toBe(1);
+  a.counts.SECRET = 99;
+  expect(b.counts.SECRET).toBeUndefined();
+});
+
+test("сбой общей проверки не кешируется и допускает повтор", async () => {
+  let calls = 0;
+  const privacy = new Privacy(async () => { if (++calls === 1) throw Error("fixture"); return []; });
+  const failed = await Promise.allSettled([privacy.scan("Повтор"), privacy.scan("Повтор")]);
+  expect(failed.map((r) => r.status)).toEqual(["rejected", "rejected"]);
+  expect((await privacy.scan("Повтор")).text).toBe("Повтор");
+  expect(calls).toBe(2);
+});

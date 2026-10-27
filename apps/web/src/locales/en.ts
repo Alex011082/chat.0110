@@ -15,6 +15,7 @@ export const s: Dictionary = {
   mark: "0110",
   markSub: "chat",
   loading: "Loading…",
+  loadingHistory: "Loading history and checking data protection. The first check of a large chat may take over a minute.",
   retry: "Retry",
   close: "Close",
   cancel: "Cancel",

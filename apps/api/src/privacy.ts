@@ -79,6 +79,7 @@ function rules(text: string): Span[] {
 
 export class Privacy {
   private cache = new Map<string, CleanText>();
+  private inflight = new Map<string, Promise<CleanText>>();
   private key = randomBytes(32);
   constructor(private entities: EntityScanner = new LocalEntities().scan) {}
 
@@ -88,6 +89,18 @@ export class Privacy {
     const hash = createHmac("sha256", this.key).update(text).digest("hex");
     const cached = this.cache.get(hash);
     if (cached) return { text: cached.text, counts: { ...cached.counts } };
+    // Вкладки, MCP и повторный опрос делят одну проверку до заполнения кеша.
+    // Иначе одна длинная история многократно занимает очередь локальной модели.
+    let pending = this.inflight.get(hash);
+    if (!pending) {
+      pending = this.scanFresh(text, hash).finally(() => { this.inflight.delete(hash); });
+      this.inflight.set(hash, pending);
+    }
+    const result = await pending;
+    return { text: result.text, counts: { ...result.counts } };
+  }
+
+  private async scanFresh(text: string, hash: string): Promise<CleanText> {
     // Сначала убираем секреты: локальная модель получает уже очищенную строку.
     const first = this.replace(text, rules(text));
     let entities: Span[];
