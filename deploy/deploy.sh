@@ -7,7 +7,9 @@ cd "$(dirname "$0")/.."
 [ -f "$HOME/.config/0110/hosts.env" ] && . "$HOME/.config/0110/hosts.env"
 SERVER="${JARVIS_SERVER:?Задай JARVIS_SERVER (например в ~/.config/0110/hosts.env)}"
 
-if [ -n "$(git status --porcelain)" ]; then
+# Неотслеживаемые пользовательские файлы не входят в git archive и не мешают
+# выкатке; отслеживаемые изменения должны совпадать с проверенным коммитом.
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "Есть незакоммиченные изменения — выкатывается только закоммиченное. Закоммить или спрячь их." >&2
   exit 1
 fi
