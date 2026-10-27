@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { McpWebhooks, validateCallbackUrl, validateSecret, type CallbackRequest } from "../src/mcp-webhooks.ts";
 
-const SECRET = "whsec_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+// Публичный HMAC-вектор из байтов 0–31, а не секрет, выданный сервисом.
+const SECRET = `whsec_${Buffer.from(Array.from({ length: 32 }, (_, i) => i)).toString("base64")}`;
 const CALLBACK = "https://events.chatgpt.com/mcp/callback?token=opaque";
 const PUBLIC = { address: "104.18.0.1", family: 4 as const };
 
