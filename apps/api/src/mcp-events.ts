@@ -139,7 +139,7 @@ export class McpEvents {
     })();
   }
 
-  async flush(authorize: (connectionId: string, event: unknown) => Promise<boolean>): Promise<void> {
+  async flush(authorize: (connectionId: string, event: unknown) => Promise<boolean | null>): Promise<void> {
     if (this.flushing) return;
     this.flushing = true;
     try {
@@ -150,7 +150,13 @@ export class McpEvents {
         let event: unknown;
         try { event = JSON.parse(row.payload); } catch { this.finish(row, "failed"); continue; }
         try {
-          if (!await authorize(subscription.connection_id, event)) { this.finish(row, "cancelled"); continue; }
+          const allowed = await authorize(subscription.connection_id, event);
+          // Пауза участника удерживает доставку без отмены задания и расхода попыток.
+          if (allowed === null) {
+            this.db.query("UPDATE mcp_event_outbox SET next_at=? WHERE subscription_id=? AND event_id=? AND state='pending'").run(this.now() + 1000, row.subscription_id, row.event_id);
+            continue;
+          }
+          if (!allowed) { this.finish(row, "cancelled"); continue; }
           const secret = await crypto.subtle.decrypt({ name: "AES-GCM", iv: Buffer.from(subscription.iv, "base64"), additionalData: this.secretAad(subscription.id) }, this.key, Buffer.from(subscription.cipher, "base64"));
           // Между await подписка могла быть отозвана или истечь.
           const current = this.subscription(subscription.id);

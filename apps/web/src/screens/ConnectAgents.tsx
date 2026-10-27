@@ -270,6 +270,7 @@ export function ConnectAgents() {
             {visible.map((card) => (
               <Body
                 key={card.id}
+                id={card.id}
                 className="flex min-w-0 flex-col gap-5 p-5 pb-7 tab:p-6 tab:pb-8"
               >
                 <header>

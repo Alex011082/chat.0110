@@ -52,6 +52,7 @@ export interface AgentSession {
   author: string;
   model: string;
   online: boolean;
+  auto_enabled?: boolean;
 }
 export interface DispatchChain {
   id: string;

@@ -15,6 +15,8 @@ export interface SessionRow {
   author: string;
   model: string;
   seen: number;
+  auto_enabled: number;
+  auto_generation: number;
 }
 export interface Task {
   id: string;
@@ -49,22 +51,26 @@ export class DispatchStore {
       CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, uid INTEGER NOT NULL, repo TEXT NOT NULL, chat TEXT NOT NULL, external TEXT NOT NULL, alias TEXT NOT NULL, name TEXT NOT NULL, author TEXT NOT NULL, model TEXT NOT NULL, seen INTEGER NOT NULL, UNIQUE(uid,repo,chat,external), UNIQUE(uid,repo,chat,alias));
       CREATE TABLE IF NOT EXISTS chains (id TEXT PRIMARY KEY, uid INTEGER NOT NULL, repo TEXT NOT NULL, chat TEXT NOT NULL, message_id TEXT NOT NULL, prompt TEXT NOT NULL, route TEXT NOT NULL, step INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, chain_id TEXT NOT NULL, session_id TEXT NOT NULL, step INTEGER NOT NULL, status TEXT NOT NULL, claim TEXT, reply_to TEXT NOT NULL, answer_id TEXT NOT NULL, text TEXT, started INTEGER, UNIQUE(chain_id,step));`);
+    if (!this.db.query<{ name: string }, []>("PRAGMA table_info(sessions)").all().some(column => column.name === "auto_enabled"))
+      this.db.exec("ALTER TABLE sessions ADD COLUMN auto_enabled INTEGER NOT NULL DEFAULT 1");
+    if (!this.db.query<{ name: string }, []>("PRAGMA table_info(sessions)").all().some(column => column.name === "auto_generation"))
+      this.db.exec("ALTER TABLE sessions ADD COLUMN auto_generation INTEGER NOT NULL DEFAULT 0");
   }
   ensureCloud(uid:number,repo:string,chat:string):SessionRow {
     const external=`cloud:chatgpt:${uid}`;
     const old=this.db.query<SessionRow,[number,string,string,string]>("SELECT * FROM sessions WHERE uid=? AND repo=? AND chat=? AND external=?").get(uid,repo.toLowerCase(),chat,external);
     if(old)return old;
     const created=this.register(uid,repo,chat,external,"chatgpt-cloud","ChatGPT","chatgpt");
-    this.db.query("UPDATE sessions SET seen=0 WHERE id=?").run(created.id);
-    return {...created,seen:0};
+    this.db.query("UPDATE sessions SET seen=0,auto_enabled=0 WHERE id=?").run(created.id);
+    return {...created,seen:0,auto_enabled:0};
   }
-  cloudTasks():Array<Task & {uid:number;repo:string;chat:string;prompt:string}> {
-    return this.db.query<Task & {uid:number;repo:string;chat:string;prompt:string},[]>(`SELECT t.*, c.uid,c.repo,c.chat,c.prompt FROM tasks t JOIN chains c ON c.id=t.chain_id JOIN sessions s ON s.id=t.session_id
-      WHERE t.status='waiting' AND s.external LIKE 'cloud:chatgpt:%' AND NOT EXISTS(SELECT 1 FROM tasks busy WHERE busy.session_id=t.session_id AND busy.status IN ('running','interrupted'))
+  cloudTasks():Array<Task & {uid:number;repo:string;chat:string;prompt:string;auto_generation:number}> {
+    return this.db.query<Task & {uid:number;repo:string;chat:string;prompt:string;auto_generation:number},[]>(`SELECT t.*, c.uid,c.repo,c.chat,c.prompt,s.auto_generation FROM tasks t JOIN chains c ON c.id=t.chain_id JOIN sessions s ON s.id=t.session_id
+      WHERE t.status='waiting' AND s.auto_enabled=1 AND s.external LIKE 'cloud:chatgpt:%' AND NOT EXISTS(SELECT 1 FROM tasks busy WHERE busy.session_id=t.session_id AND busy.status IN ('running','interrupted'))
       AND t.rowid=(SELECT MIN(first.rowid) FROM tasks first WHERE first.session_id=t.session_id AND first.status='waiting') ORDER BY t.rowid LIMIT 100`).all();
   }
   remoteReady(uid:number,author:string,sessionId:string|null=null):Array<{id:string;repo:string;chat:string}> {
-    return this.db.query<{id:string;repo:string;chat:string},[number,string,string|null,string|null]>(`SELECT t.id,c.repo,c.chat FROM tasks t JOIN chains c ON c.id=t.chain_id JOIN sessions s ON s.id=t.session_id WHERE c.uid=? AND s.author=? AND (? IS NULL OR s.id=?) AND (s.external LIKE 'remote:%' OR s.external LIKE 'cloud:%') AND t.status='waiting' AND NOT EXISTS(SELECT 1 FROM tasks b WHERE b.session_id=t.session_id AND b.status IN ('running','interrupted')) ORDER BY t.rowid LIMIT 30`).all(uid,author,sessionId,sessionId);
+    return this.db.query<{id:string;repo:string;chat:string},[number,string,string|null,string|null]>(`SELECT t.id,c.repo,c.chat FROM tasks t JOIN chains c ON c.id=t.chain_id JOIN sessions s ON s.id=t.session_id WHERE c.uid=? AND s.author=? AND s.auto_enabled=1 AND (? IS NULL OR s.id=?) AND (s.external LIKE 'remote:%' OR s.external LIKE 'cloud:%') AND t.status='waiting' AND NOT EXISTS(SELECT 1 FROM tasks b WHERE b.session_id=t.session_id AND b.status IN ('running','interrupted')) ORDER BY t.rowid LIMIT 30`).all(uid,author,sessionId,sessionId);
   }
   ownedTask(id:string,uid:number):Task & {repo:string;chat:string;prompt:string;author:string;external:string;uid:number} {
     const t=this.db.query<Task & {repo:string;chat:string;prompt:string;author:string;external:string;uid:number},[string,number]>(`SELECT t.*,c.uid,c.repo,c.chat,c.prompt,s.author,s.external FROM tasks t JOIN chains c ON c.id=t.chain_id JOIN sessions s ON s.id=t.session_id WHERE t.id=? AND c.uid=?`).get(id,uid);
@@ -115,7 +121,7 @@ export class DispatchStore {
     if (collision) throw new HttpError(409, "conflict", "Это имя уже занято другой сессией");
     const id = randomUUID();
     this.db
-      .query("INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?,?,?)")
+      .query("INSERT INTO sessions (id,uid,repo,chat,external,alias,name,author,model,seen) VALUES (?,?,?,?,?,?,?,?,?,?)")
       .run(id, uid, repo, chat, external, alias, name, author, model, Date.now());
     return this.session(id, uid);
   }
@@ -126,6 +132,10 @@ export class DispatchStore {
   }
   touch(id: string) {
     this.db.query("UPDATE sessions SET seen=? WHERE id=?").run(Date.now(), id);
+  }
+  setAutoEnabled(uid: number, sessionId: string, enabled: boolean) {
+    this.session(sessionId, uid);
+    this.db.query("UPDATE sessions SET auto_generation=auto_generation+CASE WHEN auto_enabled=0 AND ?=1 THEN 1 ELSE 0 END,auto_enabled=? WHERE id=?").run(enabled ? 1 : 0, enabled ? 1 : 0, sessionId);
   }
   resolve(uid: number, repo: string, chat: string, aliases: string[]): string[] {
     const sessions = this.db
@@ -221,6 +231,8 @@ export class DispatchStore {
   claim(sessionId: string, expectedId?: string): Task | null {
     return this.db.transaction(() => {
       this.expire();
+      const session = this.db.query<SessionRow, [string]>("SELECT * FROM sessions WHERE id=?").get(sessionId);
+      if (!session?.auto_enabled) return null;
       const busy = this.db
         .query("SELECT id FROM tasks WHERE session_id=? AND status IN ('running','interrupted')")
         .get(sessionId);
@@ -293,6 +305,7 @@ export class DispatchStore {
         author: s.author,
         model: s.model,
         online: Date.now() - s.seen < 90_000,
+        auto_enabled: !!s.auto_enabled,
       }));
     const chains: DispatchChain[] = this.db
       .query<ChainRow, [number, string, string]>(

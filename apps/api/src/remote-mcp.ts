@@ -100,6 +100,7 @@ function repoRef(value: unknown): RepoRef {
 }
 export function createRemoteMcp(o: Options) {
   const { oauth, events, dispatch, config, hub } = o;
+  const turnEventId = (taskId: string, generation: number) => `turn_${taskId}${generation ? `_${generation}` : ""}`;
   let pumping = false;
   const ghFor = (p: McpPrincipal) =>
     new GitHubClient({ token: p.session.at, userId: p.session.uid, fetch: o.fetch ?? fetch });
@@ -119,7 +120,7 @@ export function createRemoteMcp(o: Options) {
         const connectionId = `chatgpt:${task.uid}`;
         if (!events.hasActive(connectionId)) continue;
         await events.deliver(connectionId, {
-          eventId: `turn_${task.id}`,
+          eventId: turnEventId(task.id, task.auto_generation),
           name: "chat0110.turn.ready",
           timestamp: new Date().toISOString(),
           data: {
@@ -137,6 +138,9 @@ export function createRemoteMcp(o: Options) {
         try {
           const task = dispatch.ownedTask(String((event as any).data?.task_id), principal.session.uid);
           if (task.status !== "waiting") return false;
+          const session = dispatch.session(task.session_id, principal.session.uid);
+          if (!session.auto_enabled) return null;
+          if ((event as any).eventId !== turnEventId(task.id, session.auto_generation)) return false;
           const gh = ghFor(principal),
             repo = repoRef(task.repo);
           const info = await gh.getRepo(repo);
@@ -181,6 +185,7 @@ export function createRemoteMcp(o: Options) {
               String(args.model ?? ""),
             );
       dispatch.touch(session.id);
+      dispatch.setAutoEnabled(uid, session.id, true);
       return {
         connected: true,
         alias: session.alias,
@@ -363,12 +368,14 @@ export function createRemoteMcp(o: Options) {
     uid: number,
     repo: string,
     chat: string,
-  ): DispatchView & { chatgpt: { connected: boolean; last_error: string | null } } {
+  ): DispatchView & { chatgpt: { authorized: boolean; connected: boolean; last_error: string | null } } {
     const cloud = dispatch.ensureCloud(uid, repo, chat);
     const status = events.status(`chatgpt:${uid}`);
+    const authorized = oauth.hasAuthorization(`chatgpt:${uid}`, "chatgpt.com");
     const data = dispatch.list(uid, repo, chat);
-    for (const session of data.sessions) if (session.id === cloud.id) session.online = status.connected;
-    return { ...data, chatgpt: status };
+    for (const session of data.sessions)
+      if (session.id === cloud.id) session.online = status.connected && authorized && !!session.auto_enabled;
+    return { ...data, chatgpt: { ...status, connected: status.connected && authorized, authorized } };
   }
   return { handle, pump, view };
 }

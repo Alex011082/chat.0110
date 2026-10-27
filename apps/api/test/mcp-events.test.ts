@@ -24,6 +24,29 @@ async function fixture() {
 }
 
 describe("устойчивые подписки MCP Events", () => {
+  test("пауза удерживает pending без попыток и после перезапуска доставляет ровно один раз", async () => {
+    const f = await fixture();
+    await f.events.subscribe("c", 42, params);
+    await f.events.deliver("c", event);
+    await f.events.flush(async () => null);
+    expect(f.delivered).toHaveLength(0);
+    expect(f.db.query("SELECT state, attempts FROM mcp_event_outbox").get()).toEqual({ state: "pending", attempts: 0 });
+    const restarted = new McpEvents({ db: f.db, key: f.key, webhooks: f.webhooks, now: () => Date.UTC(2026, 9, 27) + 1000 });
+    await restarted.deliver("c", event);
+    await restarted.flush(async () => true);
+    await restarted.flush(async () => true);
+    expect(f.delivered).toHaveLength(1);
+  });
+  test("пауза десяти событий не задерживает доставку другому участнику", async () => {
+    const f = await fixture();
+    await f.events.subscribe("c", 42, params);
+    for (let i = 0; i < 11; i++) await f.events.deliver("c", { ...event, eventId: `queued-${i}` });
+    const authorize = async (_connection: string, value: any) => value.eventId === "queued-10" ? true : null;
+    await f.events.flush(authorize);
+    await f.events.flush(authorize);
+    expect(f.delivered).toHaveLength(1);
+    expect(f.delivered[0]?.[3]).toMatchObject({ eventId: "queued-10" });
+  });
   test("проверяет callback до активации и хранит только зашифрованный секрет", async () => {
     const f = await fixture();
     expect(f.events.hasActive("c")).toBe(false);

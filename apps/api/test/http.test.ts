@@ -9,6 +9,7 @@ import { createApp } from "../src/http.ts";
 import { SessionStore, importCookieKey, type SessionData } from "../src/session.ts";
 import { SseHub } from "../src/sse.ts";
 import { FakeGitHub } from "./fake-github.ts";
+import { DispatchStore } from "../src/dispatch.ts";
 
 const PUBLIC = "https://chat.0110.digital";
 const R = "/repos/Alex011082/chat.0110";
@@ -41,10 +42,11 @@ async function setup(opts: { allowed?: string; webDist?: string } = {}) {
     .on("GET", R, { body: repoBody });
   const sessions = new SessionStore({ key: await importCookieKey(config.cookieKey), dev: false, clientId: "cid", clientSecret: "csec", fetch: fake.fetch });
   const hub = new SseHub();
-  const app = await createApp({ config, fetch: fake.fetch, sessions, hub, now: () => new Date("2026-10-23T10:02:03Z"), rand: () => "m3p8" });
+  const dispatch = new DispatchStore(":memory:");
+  const app = await createApp({ config, fetch: fake.fetch, sessions, hub, dispatch, now: () => new Date("2026-10-23T10:02:03Z"), rand: () => "m3p8" });
   const session: SessionData = { uid: 7, login: "Alex011082", at: "ghu_x", rt: "ghr_x", exp: Date.now() + 3600_000, rexp: Date.now() + 86400_000 };
   const cookie = (await sessions.cookieFor(session)).split(";")[0]!;
-  return { app, fake, cookie, sessions, hub };
+  return { app, fake, cookie, sessions, hub, dispatch };
 }
 
 const get = (path: string, cookie?: string) => new Request(PUBLIC + path, cookie ? { headers: { cookie } } : {});
@@ -52,6 +54,29 @@ const post = (path: string, body: unknown, headers: Record<string, string> = {})
   new Request(PUBLIC + path, { method: "POST", body: JSON.stringify(body), headers: { origin: PUBLIC, "content-type": "application/json", ...headers } });
 
 describe("маршруты", () => {
+  test("автоответы переключаются только у своей сессии в открытом чате с правом записи", async () => {
+    for (const scenario of ["ok", "owner", "chat", "repo", "readonly", "closed", "missing", "body"] as const) {
+      const { app, fake, cookie, dispatch } = await setup();
+      const agent = dispatch.register(scenario === "owner" ? 8 : 7, scenario === "repo" ? "other/repo" : "Alex011082/chat.0110", scenario === "chat" ? "20261023-abcd" : "20261023-k7q2", "local:claude", "claude", "Claude");
+      fake.on("GET", R, { body: { ...repoBody, permissions: { push: scenario !== "readonly" } } });
+      fake.on("GET", /\/pulls\?state=all&head=/, { body: scenario === "missing" ? [] : [{
+        number: 1, title: "Chat", body: "<!-- chat0110\nchat_id: 20261023-k7q2\n-->", state: scenario === "closed" ? "closed" : "open", draft: true,
+        created_at: "2026-10-23T00:00:00Z", updated_at: "2026-10-23T00:00:00Z", html_url: "url", user: { login: "Alex011082" },
+        head: { ref: "chat/20261023-k7q2", sha: "h", repo: { full_name: repoBody.full_name } }, base: { ref: "main" },
+      }] });
+      const response = await app(post("/api/chats/Alex011082/chat.0110/20261023-k7q2/auto-replies", { session_id: agent.id, enabled: scenario === "body" ? "false" : false }, { cookie }));
+      expect(response.status).toBe(scenario === "ok" ? 200 : scenario === "body" ? 400 : ["readonly", "closed"].includes(scenario) ? 403 : 404);
+      if (scenario === "ok") {
+        const result = await response.json();
+        expect(result.sessions.find((s: any) => s.id === agent.id)?.auto_enabled).toBe(false);
+        expect(result.chatgpt).toEqual({ authorized: false, connected: false, last_error: null });
+        expect(result.sessions.find((s: any) => s.author === "chatgpt")?.online).toBe(false);
+        const resumed = await app(post("/api/chats/Alex011082/chat.0110/20261023-k7q2/auto-replies", { session_id: agent.id, enabled: true }, { cookie }));
+        expect((await resumed.json()).sessions.find((s: any) => s.id === agent.id)?.auto_enabled).toBe(true);
+      } else expect(dispatch.session(agent.id, scenario === "owner" ? 8 : 7).auto_enabled).toBe(1);
+      dispatch.close();
+    }
+  });
   test("GET /health", async () => {
     const { app } = await setup();
     const res = await app(get("/health"));

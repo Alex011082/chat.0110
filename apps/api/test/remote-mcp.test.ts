@@ -119,6 +119,7 @@ test("удалённый MCP требует OAuth, выдаёт события �
     const profile = await (await remote.handle(request("tools/call", { name: "chat0110_account" }, token))).json();
     expect(profile.result.structuredContent.id).toBe("github:7");
     const cloud = dispatch.ensureCloud(7, repo, chat);
+    dispatch.setAutoEnabled(7, cloud.id, true);
     dispatch.enqueue("root", 7, repo, chat, "20261023T100300Z-alex011082-q9w1", "@чатжпт вопрос", [cloud.id]);
     fake
       .on("GET", `/repos/${repo.toLowerCase()}`, {
@@ -191,6 +192,69 @@ test("удалённый MCP требует OAuth, выдаёт события �
   } finally {
     db.close();
   }
+});
+
+test("общая подписка не включает чаты; пауза удерживает outbox и запрещает take, resume доставляет один раз", async () => {
+  const f = await setup();
+  try {
+    const a = f.dispatch.ensureCloud(7, repo, chat);
+    const b = f.dispatch.ensureCloud(7, repo, "20261023-abcd");
+    f.dispatch.enqueue("paused", 7, repo, chat, "m", "question", [a.id]);
+    f.dispatch.enqueue("other-chat", 7, repo, "20261023-abcd", "m", "other", [b.id]);
+    f.fake.on("GET", `/repos/${repo.toLowerCase()}`, { body: { full_name: repo, name: "chat.0110", owner: { login: "Alex011082" }, default_branch: "main", permissions: { push: true } } });
+    f.fake.on("GET", /\/pulls\?state=all&head=/, { body: [{
+      number: 1, title: "Chat", body: `<!-- chat0110\nchat_id: ${chat}\n-->`, state: "open", draft: true,
+      created_at: "2026-10-23T00:00:00Z", updated_at: "2026-10-23T00:00:00Z", html_url: "url", user: { login: "Alex011082" },
+      head: { ref: `chat/${chat}`, sha: "head", repo: { full_name: repo } }, base: { ref: "main" },
+    }] });
+    await f.events.subscribe("chatgpt:7", 7, { name: "chat0110.turn.ready", arguments: { recipient: "chatgpt" }, delivery: { mode: "webhook", url: "https://chatgpt.com/events/callback", secret: `whsec_${Buffer.alloc(32, 1).toString("base64")}` } });
+    expect(f.remote.view(7, repo, chat).chatgpt).toEqual({ authorized: true, connected: true, last_error: null });
+    expect(f.remote.view(7, repo, chat).sessions.find(s => s.id === a.id)?.online).toBe(false);
+    await f.remote.pump();
+    expect(f.delivered).toHaveLength(0);
+    f.dispatch.setAutoEnabled(7, a.id, true);
+    const task = f.dispatch.cloudTasks()[0]!;
+    await f.events.deliver("chatgpt:7", { eventId: `turn_${task.id}_1`, name: "chat0110.turn.ready", data: { task_id: task.id } });
+    f.dispatch.setAutoEnabled(7, a.id, false);
+    await f.remote.pump();
+    expect(f.delivered).toHaveLength(0);
+    const take = await (await f.remote.handle(f.request("tools/call", { name: "chat0110_take", arguments: { task_id: task.id } }, f.token))).json();
+    expect(take.result.isError).toBe(true);
+    f.dispatch.setAutoEnabled(7, a.id, true);
+    await Bun.sleep(1000);
+    await f.remote.pump();
+    await f.remote.pump();
+    expect(f.delivered).toHaveLength(1);
+    expect(f.dispatch.session(b.id, 7).auto_enabled).toBe(0);
+    expect(f.remote.view(7, repo, chat).sessions.find(s => s.id === a.id)?.online).toBe(true);
+    const previousEvent = f.delivered[0].eventId;
+    f.dispatch.setAutoEnabled(7, a.id, false);
+    f.dispatch.setAutoEnabled(7, a.id, true);
+    await f.remote.pump();
+    expect(f.delivered).toHaveLength(2);
+    expect(f.delivered[1].eventId).not.toBe(previousEvent);
+    f.dispatch.setAutoEnabled(7, a.id, true);
+    await f.remote.pump();
+    expect(f.delivered).toHaveLength(2);
+    const claimed = await (await f.remote.handle(f.request("tools/call", { name: "chat0110_take", arguments: { task_id: task.id } }, f.token))).json();
+    expect(claimed.result.structuredContent.claim).toBeString();
+    f.dispatch.setAutoEnabled(7, a.id, false);
+    f.dispatch.setAutoEnabled(7, a.id, true);
+    await f.remote.pump();
+    expect(f.delivered).toHaveLength(2);
+    f.fake
+      .on("GET", /\/contents\/chats\/.*\/(messages|decisions)/, { body: [] })
+      .on("GET", /\/contents\/chats\/.*\/chat\.json/, { status: 404, body: {} })
+      .on("GET", /\/compare\//, { status: 404, body: {} })
+      .on("GET", /\/(issues\/1\/comments|pulls\/1\/(comments|reviews))/, { body: [] })
+      .on("GET", /\/pulls\?state=all&(sort|base)=/, { body: [] });
+    f.dispatch.setAutoEnabled(7, a.id, false);
+    const connected = await (await f.remote.handle(f.request("tools/call", { name: "chat0110_connect", arguments: { repo: repo.toLowerCase(), chat_id: chat, author: "chatgpt" } }, f.token))).json();
+    expect(connected).toMatchObject({ result: { structuredContent: { connected: true } } });
+    expect(connected.result.structuredContent.session_id).toBe(a.id);
+    expect(f.dispatch.session(a.id, 7).auto_enabled).toBe(1);
+    expect(f.dispatch.session(b.id, 7).auto_enabled).toBe(0);
+  } finally { f.db.close(); }
 });
 
 test("ожидание конкретной сессии не забирает задания другой сессии того же ИИ", async () => {

@@ -249,6 +249,22 @@ export async function createApp(deps: AppDeps): Promise<App> {
           await gh.getRepo(repo);
           return json(200, remote.view(session.uid, `${repo.owner}/${repo.name}`, chatId));
         }
+        if (rest.length === 1 && rest[0] === "auto-replies" && method === "POST") {
+          const body = await readJson(req);
+          if (typeof body.session_id !== "string" || !body.session_id || typeof body.enabled !== "boolean")
+            throw badRequest("Нужны session_id и enabled");
+          const agent = dispatch.session(body.session_id, session.uid);
+          if (agent.repo !== `${repo.owner}/${repo.name}`.toLowerCase() || agent.chat !== chatId)
+            throw notFound("Сессия не найдена");
+          const info = await gh.getRepo(repo);
+          if (!info.can_push) throw forbidden("Нет права записи");
+          const pull = await gh.findChatPull(repo, chatId);
+          if (!pull) throw notFound("Чат не найден");
+          if (pull.state !== "open") throw forbidden("Чат закрыт");
+          dispatch.setAutoEnabled(session.uid, agent.id, body.enabled);
+          if (body.enabled && deps.background) void remote.pump();
+          return json(200, remote.view(session.uid, info.full_name, chatId));
+        }
         if (rest.length === 1 && rest[0] === "dispatch" && method === "POST") {
           const info = await gh.getRepo(repo);
           if (!info.can_push) throw forbidden("Нет права записи");

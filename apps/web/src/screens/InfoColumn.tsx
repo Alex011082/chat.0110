@@ -1,5 +1,8 @@
 import type { ChatDetail, Decision, ForkRef, InheritedContext, TimelineItem } from "@chat0110/chat-protocol";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { dispatchRequest } from "../dispatch.ts";
+import { mergeAgentParticipants, sessionsForAuthor, type AutoReplyView } from "../lib/auto-replies.ts";
+import { ParticipantAutoReplies } from "./ParticipantAutoReplies.tsx";
 import { useCopy } from "../hooks.ts";
 import { agentLinkPhrase } from "../lib/chat.ts";
 import { awaitsHuman, statusLabel } from "../lib/decision.ts";
@@ -34,13 +37,37 @@ interface InfoProps {
 export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, decisions, outgoing, onJump, onPropose, store }: InfoProps) {
   const counts = useMemo(() => countTimeline(items), [items]);
   const owner = chat.created_by.toLowerCase();
+  const [autoReplies, setAutoReplies] = useState<AutoReplyView | null>(null);
+  const [autoError, setAutoError] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setAutoReplies(null);
+    const refresh = () =>
+      dispatchRequest(`${chat.repo}/${chat.chat_id}`).then(
+        (value) => {
+          if (alive) {
+            setAutoReplies(value as AutoReplyView);
+            setAutoError(false);
+          }
+        },
+        () => {
+          if (alive) setAutoError(true);
+        },
+      );
+    void refresh();
+    const timer = setInterval(() => void refresh(), 5000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [chat.repo, chat.chat_id]);
   const participants = useMemo(
     // Владелец — первым, остальные — кто писал недавно.
     () =>
-      [...chat.participants].sort((a, b) =>
+      mergeAgentParticipants(chat.participants, autoReplies?.sessions ?? []).sort((a, b) =>
         a.author === owner ? -1 : b.author === owner ? 1 : a.last_at < b.last_at ? 1 : a.last_at > b.last_at ? -1 : 0,
       ),
-    [chat.participants, owner],
+    [chat.participants, owner, autoReplies],
   );
   const phrase = agentLinkPhrase(chat.url, store);
   const { copied, failed, copy } = useCopy();
@@ -54,21 +81,23 @@ export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, de
           {participants.map((p) => {
             const when = ago(p.last_at, now);
             const role = p.is_agent
-              ? s.info.agentWrote(when)
+              ? p.count === 0 ? (s.locale === "en" ? "Has not replied yet" : "Ещё не отвечал") : s.info.agentWrote(when)
               : p.author === owner
                 ? s.info.owner
                 : s.info.humanWrote(when);
             return (
-              <li key={p.author} className="flex items-center gap-3">
-                <Lamp state={isFresh(p.last_at, now) ? "live" : "off"} />
+              <li key={p.author} className="flex items-start gap-3">
+                <Lamp state={p.is_agent ? sessionsForAuthor(autoReplies?.sessions ?? [], p.author).some((session) => session.auto_enabled && session.online) ? "live" : "off" : isFresh(p.last_at, now) ? "live" : "off"} className="mt-1.5 shrink-0" />
                 <span className="flex min-w-0 flex-col gap-0.5">
                   <span className="text-copy leading-snug font-semibold [overflow-wrap:anywhere]">{p.display}</span>
                   <span className="text-cap text-ink-2">{role}</span>
+                  {p.is_agent ? <ParticipantAutoReplies author={p.author} sessions={sessionsForAuthor(autoReplies?.sessions ?? [], p.author)} view={autoReplies} repo={chat.repo} chatId={chat.chat_id} canPush={chat.can_push && chat.state === "open"} onChange={setAutoReplies} /> : null}
                 </span>
               </li>
             );
           })}
         </ul>
+        {autoError ? <p role="status" className="m-0 text-cap text-ink-2">{s.locale === "en" ? "Connection status unavailable. Retrying…" : "Не удалось проверить сессии. Повторяем…"}</p> : null}
       </Plate>
 
       <Decisions chat={chat} decisions={decisions} now={now} onJump={onJump} />
