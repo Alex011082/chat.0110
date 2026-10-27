@@ -274,6 +274,9 @@ export class McpOAuth {
       const application = hostname === "chatgpt.com" ? "ChatGPT" : hostname.startsWith("claude.") ? "Claude" : hostname === "grok.com" ? "Grok" : "MCP-клиент на этом компьютере";
       const html = `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Подключить ${application} — chat.0110</title><body><main><h1>Подключить ${application}</h1><p>Вы вошли как <strong>${escape(auth.session.login)}</strong>.</p><p>Подключение сможет читать ваши чаты, получать задания и писать ответы от имени подключённого ИИ в пределах ваших прав GitHub.</p><p>Адрес приложения: <code>${escape(p.redirect_uri)}</code></p><p>Срок доступа — до 30 дней. Подключение можно отозвать.</p><form method="post" action="/oauth/authorize">${hidden}<input type="hidden" name="consent_nonce" value="${nonce}"><button type="submit" name="decision" value="allow">Разрешить подключение</button> <button type="submit" name="decision" value="deny">Отмена</button></form></main></body></html>`;
       const h = headers("text/html; charset=utf-8");
+      // У HTML-форм no-referrer обнуляет Origin даже при POST на свой домен.
+      // same-origin сохраняет проверку CSRF, не раскрывая URL сайту клиента.
+      h.set("Referrer-Policy", "same-origin");
       h.set("Content-Security-Policy", "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
       h.set("X-Frame-Options", "DENY"); h.append("Set-Cookie", this.consentCookieValue(binding));
       response = new Response(html, { headers: h });

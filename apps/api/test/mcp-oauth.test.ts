@@ -102,6 +102,24 @@ test("согласие явное, привязано к Origin, cookie, пол�
   expect((await post(ROOT, f.cookie + "; " + c.consentCookie)).status).toBe(403);
 });
 
+test("HTML-согласие сохраняет Origin своей формы и не передаёт referrer другому сайту", async () => {
+  const f = await setup(); const client = (await f.register()).body.client_id;
+  const c = await f.consent(f.authorizeParams(client));
+  // no-referrer превращает Origin навигационного POST в null даже на своём
+  // домене. Форма должна пройти строгую проверку, не разрешая Origin: null.
+  expect(c.res.headers.get("Referrer-Policy")).toBe("same-origin");
+  const body = new URLSearchParams(f.authorizeParams(client));
+  body.set("consent_nonce", c.nonce); body.set("decision", "allow");
+  const post = (origin?: string) => f.handle("/oauth/authorize", {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: f.cookie + "; " + c.consentCookie, ...(origin === undefined ? {} : { Origin: origin }) }, body,
+  });
+  expect((await post("null")).status).toBe(403);
+  expect((await post()).status).toBe(403);
+  const approved = await post(ROOT);
+  expect(approved.status).toBe(302);
+  expect(approved.headers.get("Referrer-Policy")).toBe("no-referrer");
+});
+
 test("код одноразовый, проверяет PKCE, клиента, redirect и resource", async () => {
   const f = await setup(); const client = (await f.register()).body.client_id;
   const authorization = await f.approve(f.authorizeParams(client));
