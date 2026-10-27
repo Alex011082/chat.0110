@@ -65,3 +65,17 @@ test("author ограничен форматом id протокола", () => {
   expect(() => q.register(1, "a/b", "20261026-abcd", "x", "valid", "Name", "a".repeat(33))).toThrow();
   q.close();
 });
+
+test("ChatGPT можно адресовать до подключения: задание ждёт в постоянной очереди",()=>{
+  const q=new DispatchStore(":memory:");
+  const s=q.ensureCloud(7,"A/B","20261026-abcd");
+  expect(s.seen).toBe(0);
+  expect(q.resolve(7,"A/B","20261026-abcd",["чатжпт"])).toEqual([s.id]);
+  q.enqueue("cloud-root",7,"A/B","20261026-abcd","m","question",[s.id]);
+  expect(q.cloudTasks()[0]).toMatchObject({uid:7,repo:"a/b",chat:"20261026-abcd"});
+  const t=q.claim(s.id)!;
+  expect(q.cloudTasks()).toEqual([]);
+  expect(q.ownedTask(t.id,7).claim).toBe(t.claim);
+  expect(()=>q.ownedTask(t.id,8)).toThrow();
+  q.close();
+});

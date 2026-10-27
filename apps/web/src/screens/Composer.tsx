@@ -90,19 +90,14 @@ export function Composer(p: ComposerProps) {
     <div id="mention-help" className="flex flex-col gap-1.5 text-cap text-ink-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span>{d.help}</span>
-        <details>
-          <summary className="cursor-pointer">{d.connect}</summary>
-          <p className="max-w-sm">
-            {d.guide}{" "}
-            <a
-              href="https://github.com/Alex011082/chat.0110/blob/codex/mentions-and-languages/docs/agent-connector.md"
-              target="_blank"
-              rel="noreferrer"
-            >
-              {d.guideLink}
-            </a>
-          </p>
-        </details>
+        <a
+          href={`/connect?repo=${encodeURIComponent(p.chatKey.split("/").slice(0, 2).join("/"))}&chat=${encodeURIComponent(p.chatKey.split("/")[2] ?? "")}`}
+          target="_blank"
+          rel="noreferrer"
+          className="text-action-ink"
+        >
+          {d.connect} ↗
+        </a>
       </div>
       {options.length > 0 ? (
         <div
@@ -128,6 +123,15 @@ export function Composer(p: ComposerProps) {
             </button>
           ))}
         </div>
+      ) : null}
+      {route.length > 0 &&
+      !routingError &&
+      resolved.some((id) => !dispatch?.sessions.find((session) => session.id === id)?.online) ? (
+        <span>
+          {s.locale === "en"
+            ? "The message will be saved and wait for the participant to connect."
+            : "Сообщение сохранится и будет ждать подключения участника."}
+        </span>
       ) : null}
       {routingError ? (
         <span role="alert" className="text-action-ink">

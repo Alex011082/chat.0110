@@ -43,12 +43,34 @@ interface ChainRow {
 /** SQLite хранит доставку и блокировки; сообщения по-прежнему хранятся в Git. */
 export class DispatchStore {
   private db: Database;
-  constructor(path: string) {
-    this.db = new Database(path, { create: true });
+  constructor(path: string | Database) {
+    this.db = typeof path === "string" ? new Database(path, { create: true }) : path;
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, uid INTEGER NOT NULL, repo TEXT NOT NULL, chat TEXT NOT NULL, external TEXT NOT NULL, alias TEXT NOT NULL, name TEXT NOT NULL, author TEXT NOT NULL, model TEXT NOT NULL, seen INTEGER NOT NULL, UNIQUE(uid,repo,chat,external), UNIQUE(uid,repo,chat,alias));
       CREATE TABLE IF NOT EXISTS chains (id TEXT PRIMARY KEY, uid INTEGER NOT NULL, repo TEXT NOT NULL, chat TEXT NOT NULL, message_id TEXT NOT NULL, prompt TEXT NOT NULL, route TEXT NOT NULL, step INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, chain_id TEXT NOT NULL, session_id TEXT NOT NULL, step INTEGER NOT NULL, status TEXT NOT NULL, claim TEXT, reply_to TEXT NOT NULL, answer_id TEXT NOT NULL, text TEXT, started INTEGER, UNIQUE(chain_id,step));`);
+  }
+  ensureCloud(uid:number,repo:string,chat:string):SessionRow {
+    const external=`cloud:chatgpt:${uid}`;
+    const old=this.db.query<SessionRow,[number,string,string,string]>("SELECT * FROM sessions WHERE uid=? AND repo=? AND chat=? AND external=?").get(uid,repo.toLowerCase(),chat,external);
+    if(old)return old;
+    const created=this.register(uid,repo,chat,external,"chatgpt-cloud","ChatGPT","chatgpt");
+    this.db.query("UPDATE sessions SET seen=0 WHERE id=?").run(created.id);
+    return {...created,seen:0};
+  }
+  cloudTasks():Array<Task & {uid:number;repo:string;chat:string;prompt:string}> {
+    return this.db.query<Task & {uid:number;repo:string;chat:string;prompt:string},[]>(`SELECT t.*, c.uid,c.repo,c.chat,c.prompt FROM tasks t JOIN chains c ON c.id=t.chain_id JOIN sessions s ON s.id=t.session_id
+      WHERE t.status='waiting' AND s.external LIKE 'cloud:chatgpt:%' AND NOT EXISTS(SELECT 1 FROM tasks busy WHERE busy.session_id=t.session_id AND busy.status IN ('running','interrupted'))
+      AND t.rowid=(SELECT MIN(first.rowid) FROM tasks first WHERE first.session_id=t.session_id AND first.status='waiting') ORDER BY t.rowid LIMIT 100`).all();
+  }
+  remoteReady(uid:number,author:string):Array<{id:string;repo:string;chat:string}> {
+    return this.db.query<{id:string;repo:string;chat:string},[number,string]>(`SELECT t.id,c.repo,c.chat FROM tasks t JOIN chains c ON c.id=t.chain_id JOIN sessions s ON s.id=t.session_id WHERE c.uid=? AND s.author=? AND (s.external LIKE 'remote:%' OR s.external LIKE 'cloud:%') AND t.status='waiting' AND NOT EXISTS(SELECT 1 FROM tasks b WHERE b.session_id=t.session_id AND b.status IN ('running','interrupted')) ORDER BY t.rowid LIMIT 30`).all(uid,author);
+  }
+  ownedTask(id:string,uid:number):Task & {repo:string;chat:string;prompt:string;author:string;external:string;uid:number} {
+    const t=this.db.query<Task & {repo:string;chat:string;prompt:string;author:string;external:string;uid:number},[string,number]>(`SELECT t.*,c.uid,c.repo,c.chat,c.prompt,s.author,s.external FROM tasks t JOIN chains c ON c.id=t.chain_id JOIN sessions s ON s.id=t.session_id WHERE t.id=? AND c.uid=?`).get(id,uid);
+    if(!t)throw notFound("Ход не найден");
+    if(t.status==='cancelled')throw new HttpError(409,"dispatch_cancelled","Цепочка отменена");
+    return t;
   }
   close() {
     this.db.close();
@@ -196,7 +218,7 @@ export class DispatchStore {
       .run(stale);
     this.db.query("UPDATE tasks SET status='interrupted' WHERE status='running' AND started < ?").run(stale);
   }
-  claim(sessionId: string): Task | null {
+  claim(sessionId: string, expectedId?: string): Task | null {
     return this.db.transaction(() => {
       this.expire();
       const busy = this.db
@@ -206,7 +228,7 @@ export class DispatchStore {
       const t = this.db
         .query<Task, [string]>("SELECT * FROM tasks WHERE session_id=? AND status='waiting' ORDER BY rowid LIMIT 1")
         .get(sessionId);
-      if (!t) return null;
+      if (!t || (expectedId && t.id !== expectedId)) return null;
       const claim = randomUUID();
       this.db.query("UPDATE tasks SET status='running',claim=?,started=? WHERE id=?").run(claim, Date.now(), t.id);
       this.db.query("UPDATE chains SET status='running' WHERE id=?").run(t.chain_id);

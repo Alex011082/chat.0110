@@ -25,6 +25,7 @@ export function Login({
           </span>
         </div>
         <LanguageSwitch />
+        <a href="/connect" className="text-cap text-ink-2">{s.locale === "en" ? "Connect your AI" : "Подключить свой ИИ"}</a>
         <Grille width="100%" height={26} />
         <div className="flex flex-col gap-2.5">
           <h1 className="m-0 text-[24px] leading-[1.2] font-semibold tracking-[-0.02em]">{s.login.title}</h1>

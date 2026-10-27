@@ -1,3 +1,4 @@
+import { ConnectAgents } from "./screens/ConnectAgents.tsx";
 import type { AppConfig, Me } from "@chat0110/chat-protocol";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { api, ApiFailure, mockRequested, setUnauthorizedHandler } from "./api.ts";
@@ -6,14 +7,13 @@ import { Mark } from "./ui/kit.tsx";
 import { Login } from "./screens/Login.tsx";
 import { Shell } from "./screens/Shell.tsx";
 
-type Auth =
-  | { state: "loading" }
-  | { state: "anon"; notice?: "forbidden" | "offline" }
-  | { state: "in"; me: Me };
+type Auth = { state: "loading" } | { state: "anon"; notice?: "forbidden" | "offline" } | { state: "in"; me: Me };
 
 export function App() {
-  const locale = useSyncExternalStore(subscribeLocale,getLocale,getLocale);
-  useEffect(() => { setLocale(locale); }, [locale]);
+  const locale = useSyncExternalStore(subscribeLocale, getLocale, getLocale);
+  useEffect(() => {
+    setLocale(locale);
+  }, [locale]);
   const [auth, setAuth] = useState<Auth>({ state: "loading" });
   const [config, setConfig] = useState<AppConfig | null>(null);
 
@@ -50,6 +50,7 @@ export function App() {
     location.assign(mockRequested() ? "/?mock=login" : "/");
   };
 
+  if (location.pathname === "/connect") return <ConnectAgents />;
   if (auth.state === "loading") {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-ground" role="status" aria-label={s.loading}>
@@ -57,6 +58,18 @@ export function App() {
       </div>
     );
   }
-  if (auth.state === "anon") return <Login config={config} notice={auth.notice ? (auth.notice === "forbidden" ? {title:s.login.forbiddenTitle,text:s.login.forbidden} : {title:s.errors.generic,text:s.login.serverDown}) : undefined} />;
+  if (auth.state === "anon")
+    return (
+      <Login
+        config={config}
+        notice={
+          auth.notice
+            ? auth.notice === "forbidden"
+              ? { title: s.login.forbiddenTitle, text: s.login.forbidden }
+              : { title: s.errors.generic, text: s.login.serverDown }
+            : undefined
+        }
+      />
+    );
   return <Shell me={auth.me} config={config} onLogout={() => void logout()} />;
 }
