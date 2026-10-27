@@ -204,6 +204,7 @@ export interface AcceptAgentPrResponse {
 }
 
 export type ApiErrorCode =
+  | "privacy_unavailable"
   | "dispatch_cancelled"
   | "unauthorized"
   | "forbidden"

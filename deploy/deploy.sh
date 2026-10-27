@@ -36,6 +36,8 @@ ssh "$SERVER" "set -euo pipefail
   # работает от jarvis: без явных прав он не зайдёт в релиз (ловушка 23.10).
   sudo chmod -R u=rwX,go=rX $REL.incoming
   sudo chown -R root:root $REL.incoming
+  # Не переключаем работающий сайт на релиз без локальной защиты данных.
+  sudo -u jarvis env HF_HOME=/var/lib/chat0110/privacy-cache /var/lib/chat0110/privacy-venv/bin/python $REL.incoming/apps/api/privacy/benchmark.py
   sudo rm -rf $REL
   sudo mv $REL.incoming $REL
   PREVIOUS=\$(readlink -f /opt/chat0110/current)

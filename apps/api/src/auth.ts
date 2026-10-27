@@ -112,7 +112,7 @@ export function createAuth(deps: AuthDeps) {
         return redirect(next, [...clear, await sessions.cookieFor(session)]);
       } catch (e) {
         const why = e instanceof HttpError ? e.message : "GitHub не ответил";
-        if (!(e instanceof HttpError)) console.error("вход: сбой обмена кода", e);
+        if (!(e instanceof HttpError)) console.error("вход: сбой обмена кода");
         return withCookies(htmlPage(400, "Вход не удался", why, retry), clear);
       }
     },

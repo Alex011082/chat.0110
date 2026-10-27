@@ -45,7 +45,7 @@ interface ChatViewProps {
   focusTick: number;
   onReply: (m: MessageItem) => void;
   onClearReply: () => void;
-  onSend: (text: string, replyTo?: string) => void;
+  onSend: (text: string, replyTo?: string) => void | Promise<boolean>;
   onRetry: (localId: string) => void;
   onAccept: (n: number) => Promise<void>;
   /** Название родителя для дочернего чата (из контекста или списка). */

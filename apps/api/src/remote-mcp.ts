@@ -1,3 +1,4 @@
+import { defaultPrivacy, type Privacy } from "./privacy.ts";
 import { canonicalMention, isChatId, type DispatchView } from "@chat0110/chat-protocol";
 import type { Config } from "./config.ts";
 import { GitHubClient, type Fetch, type RepoRef } from "./github.ts";
@@ -10,6 +11,7 @@ import type { SseHub } from "./sse.ts";
 
 interface Options {
   config: Config;
+  privacy?: Privacy;
   dispatch: DispatchStore;
   oauth: McpOAuth;
   events: McpEvents;
@@ -99,6 +101,7 @@ function repoRef(value: unknown): RepoRef {
   return { owner: owner!, name: name! };
 }
 export function createRemoteMcp(o: Options) {
+  const privacy = o.privacy ?? defaultPrivacy;
   const { oauth, events, dispatch, config, hub } = o;
   const turnEventId = (taskId: string, generation: number) => `turn_${taskId}${generation ? `_${generation}` : ""}`;
   let pumping = false;
@@ -165,7 +168,7 @@ export function createRemoteMcp(o: Options) {
       const repo = repoRef(args.repo),
         chat = String(args.chat_id);
       if (!isChatId(chat)) throw badRequest("Неверный чат");
-      const timeline = await getTimeline(gh, repo, chat);
+      const timeline = await getTimeline(gh, repo, chat, privacy);
       if (!timeline.chat.can_push || timeline.chat.state !== "open")
         throw forbidden("Чат закрыт или доступен только для чтения");
       const author = canonicalMention(String(args.author));
@@ -227,7 +230,7 @@ export function createRemoteMcp(o: Options) {
         task_id: id,
         claim: claimed.claim,
         resumed: !!task.claim,
-        prompt: task.prompt,
+        prompt: (await privacy.scan(task.prompt)).text,
         reply_to: task.reply_to,
         repo: task.repo,
         chat_id: task.chat,
@@ -236,14 +239,15 @@ export function createRemoteMcp(o: Options) {
     dispatch.task(id, task.session_id, String(args.claim));
     if (name === "chat0110_context") {
       dispatch.heartbeat(id, task.session_id, String(args.claim));
-      return { prompt: task.prompt, reply_to: task.reply_to, timeline: await getTimeline(gh, repo, task.chat) };
+      return { prompt: (await privacy.scan(task.prompt)).text, reply_to: task.reply_to, timeline: await getTimeline(gh, repo, task.chat, privacy) };
     }
     if (name === "chat0110_reply") {
       if (typeof args.text !== "string" || !args.text.trim() || args.text.length > 60_000)
         throw badRequest("Нужен ответ до 60000 знаков");
-      dispatch.prepareAnswer(id, task.session_id, String(args.claim), args.text.trim());
+      args.text = (await privacy.scan(args.text.replace(/\r\n?/g, "\n").trim())).text;
+      dispatch.prepareAnswer(id, task.session_id, String(args.claim), args.text as string);
       const item = await postMessage(
-        { gh, user: { login: p.session.login, id: uid } },
+        { gh, user: { login: p.session.login, id: uid }, privacy },
         repo,
         task.chat,
         { text: args.text, reply_to: task.reply_to },
@@ -337,7 +341,7 @@ export function createRemoteMcp(o: Options) {
         return respond({});
       }
       if (body.method === "tools/call") {
-        const result = await tool(principal, String(body.params?.name), body.params?.arguments ?? {});
+        const result = await privacy.object(await tool(principal, String(body.params?.name), body.params?.arguments ?? {}));
         return respond({ content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result });
       }
       return json(

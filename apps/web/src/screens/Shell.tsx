@@ -1,3 +1,4 @@
+import { checkPrivacy } from "../privacy.ts";
 import type { AppConfig, ChatActivation, ChatMigration, ChatSummary, Decision, GraphResponse, Me, MessageItem, RepoInfo, TimelineResponse } from "@chat0110/chat-protocol";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, ApiFailure, errorText } from "../api.ts";
@@ -240,7 +241,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       try {
         const req = entry.reply_to ? { text: entry.text, reply_to: entry.reply_to } : { text: entry.text };
         const { item } = await api().postMessage(repo, chatId, { ...req, request_id: entry.localId });
-        patchEntry(key, entry.localId, { status: "published", item, error: undefined });
+        patchEntry(key, entry.localId, { status: "published", text: item.text, item, error: undefined });
         if (latest.current.open?.chat_id === chatId) void latest.current.loadTimeline();
       } catch (e) {
         patchEntry(key, entry.localId, { status: "error", error: errorText(e) });
@@ -249,8 +250,10 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
     [patchEntry],
   );
 
-  const send = (text: string, replyTo?: string) => {
-    if (!repoFull || !route.chatId || !chatKey) return;
+  const send = async (text: string, replyTo?: string): Promise<boolean> => {
+    if (!repoFull || !route.chatId || !chatKey) return false;
+    try { text = (await checkPrivacy(chatKey, text)).text; }
+    catch (error) { setToast(error instanceof Error ? error.message : s.errors.generic); return false; }
     const entry: LocalEntry = {
       localId: newLocalId(),
       text,
@@ -260,6 +263,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
     };
     setOutbox((box) => ({ ...box, [chatKey]: [...(box[chatKey] ?? []), entry] }));
     void post(chatKey, repoFull, route.chatId, entry);
+    return true;
   };
 
   const retry = (localId: string) => {

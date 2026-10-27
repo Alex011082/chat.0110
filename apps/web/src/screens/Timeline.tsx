@@ -1,3 +1,4 @@
+import { PrivacyNotice } from "./PrivacyPanel.tsx";
 import {
   isAgent,
   resolveAuthor,
@@ -349,6 +350,7 @@ function InheritedMessage({ m, point, origin }: { m: MessageItem; point: boolean
           ) : null}
         </div>
         <Markdown text={m.text} />
+        <PrivacyNotice text={m.text} />
       </div>
     </article>
   );
@@ -479,6 +481,7 @@ function Message({ m, first, published, ctx }: { m: MessageItem; first: boolean;
         </div>
         {reply ? <span className="text-cap text-ink-2">{replyLine(reply)}</span> : null}
         <Markdown text={m.text} />
+        <PrivacyNotice text={m.text} />
         <div className="flex flex-wrap gap-4">
           <TextButton onClick={() => ctx.onReply(m)}>{s.timeline.reply}</TextButton>
           {m.url ? (

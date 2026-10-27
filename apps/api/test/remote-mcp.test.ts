@@ -1,3 +1,4 @@
+import { testPrivacy } from "./privacy-fixture.ts";
 import { test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
@@ -48,7 +49,7 @@ async function setup() {
       },
     },
   });
-  const remote = createRemoteMcp({ config, dispatch, oauth, events, hub: new SseHub(), fetch: fake.fetch });
+  const remote = createRemoteMcp({ privacy: testPrivacy, config, dispatch, oauth, events, hub: new SseHub(), fetch: fake.fetch });
   const request = (method: string, args: unknown = {}, token?: string) =>
     new Request(`${ROOT}/mcp`, {
       method: "POST",
@@ -120,7 +121,7 @@ test("удалённый MCP требует OAuth, выдаёт события �
     expect(profile.result.structuredContent.id).toBe("github:7");
     const cloud = dispatch.ensureCloud(7, repo, chat);
     dispatch.setAutoEnabled(7, cloud.id, true);
-    dispatch.enqueue("root", 7, repo, chat, "20261023T100300Z-alex011082-q9w1", "@чатжпт вопрос", [cloud.id]);
+    dispatch.enqueue("root", 7, repo, chat, "20261023T100300Z-alex011082-q9w1", "@чатжпт вопрос; password=old-private-value", [cloud.id]);
     fake
       .on("GET", `/repos/${repo.toLowerCase()}`, {
         body: {
@@ -177,6 +178,7 @@ test("удалённый MCP требует OAuth, выдаёт события �
       )
     ).json();
     expect(take.result.structuredContent.claim).toBeString();
+    expect(take.result.structuredContent.prompt).not.toContain("old-private-value");
     expect(dispatch.cloudTasks()).toEqual([]);
     const dup = await (
       await remote.handle(
@@ -189,6 +191,18 @@ test("удалённый MCP требует OAuth, выдаёт события �
     ).json();
     expect(dup.result.structuredContent.resumed).toBe(true);
     expect(dup.result.structuredContent.claim).toBe(take.result.structuredContent.claim);
+    fake.on("GET", /\/contents\/chats\/.+\/messages\//, { status: 404, body: { message: "Not Found" } });
+    fake.on("PUT", /\/contents\//, { status: 201, body: { commit: { sha: "reply", html_url: "https://github.com/c/reply" } } });
+    const reply = await (await remote.handle(request("tools/call", {
+      name: "chat0110_reply", arguments: { task_id: take.result.structuredContent.task_id, claim: take.result.structuredContent.claim, text: "password=new-private-value; private@example.org" },
+    }, token))).json();
+    expect(reply.result.isError).not.toBe(true);
+    expect(reply.result.structuredContent.item.text).toBe("password=[SECRET_1]; [EMAIL_1]");
+    const stored = JSON.stringify(db.query("SELECT text FROM tasks").all());
+    expect(stored).not.toContain("new-private-value");
+    expect(stored).not.toContain("private@example.org");
+    const written = fake.find("PUT", /\/contents\//)[0]!.body.content;
+    expect(Buffer.from(written, "base64").toString()).not.toContain("new-private-value");
   } finally {
     db.close();
   }

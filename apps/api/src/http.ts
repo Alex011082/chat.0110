@@ -1,3 +1,4 @@
+import { defaultPrivacy, type Privacy } from "./privacy.ts";
 import { Database } from "bun:sqlite";
 import { McpOAuth } from "./mcp-oauth.ts";
 import { McpEvents } from "./mcp-events.ts";
@@ -43,6 +44,7 @@ import { createWebhook } from "./webhook.ts";
 
 export interface AppDeps {
   config: Config;
+  privacy?: Privacy;
   dispatch?: DispatchStore;
   stateDb?: Database;
   background?: boolean;
@@ -78,7 +80,7 @@ function errorResponse(e: unknown): Response {
     const extra: Record<string, string> = e.retryAfter !== undefined ? { "Retry-After": String(e.retryAfter) } : {};
     return json(e.status, e.toJSON(), extra);
   }
-  console.error("необработанная ошибка запроса", e);
+  console.error("необработанная ошибка запроса");
   return json(500, { error: "Внутренняя ошибка сервера", code: "github_error" });
 }
 
@@ -114,6 +116,7 @@ async function readJson(req: Request): Promise<Record<string, unknown>> {
 
 export async function createApp(deps: AppDeps): Promise<App> {
   const { config } = deps;
+  const privacy = deps.privacy ?? defaultPrivacy;
   const stateDb = deps.stateDb ?? new Database(":memory:");
   const dispatch = deps.dispatch ?? new DispatchStore(stateDb);
   const fetcher = deps.fetch ?? fetch;
@@ -132,7 +135,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
   const key = await importCookieKey(config.cookieKey);
   const oauth = new McpOAuth({ db: stateDb, key, publicUrl: config.publicUrl, sessions, config });
   const events = new McpEvents({ db: stateDb, key });
-  const remote = createRemoteMcp({ config, dispatch, oauth, events, hub, fetch: fetcher });
+  const remote = createRemoteMcp({ config, dispatch, oauth, events, hub, privacy, fetch: fetcher });
   if (deps.background) {
     const timer = setInterval(() => void remote.pump(), 2000);
     timer.unref();
@@ -172,7 +175,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
 
     const { session, setCookie } = await requireSession(req);
     const gh = new GitHubClient({ token: session.at, userId: session.uid, fetch: fetcher, caches });
-    const ctx: ChatCtx = { gh, user: { login: session.login, id: session.uid } };
+    const ctx: ChatCtx = { gh, user: { login: session.login, id: session.uid }, privacy };
     if (deps.now) ctx.now = deps.now;
     if (deps.rand) ctx.rand = deps.rand;
 
@@ -203,11 +206,11 @@ export async function createApp(deps: AppDeps): Promise<App> {
       }
       if (path === "/api/migration" && method === "POST") {
         const body = await readJson(req);
-        const out: ChatMigration = await migrateChats(gh, repoFromParam(body.repo ?? url.searchParams.get("repo")));
+        const out: ChatMigration = await migrateChats(gh, repoFromParam(body.repo ?? url.searchParams.get("repo")), privacy);
         return json(200, out);
       }
       if (path === "/api/chats" && method === "GET")
-        return json(200, await listChats(gh, repoFromParam(url.searchParams.get("repo"))));
+        return json(200, await listChats(gh, repoFromParam(url.searchParams.get("repo")), privacy));
       if (path === "/api/chats" && method === "POST") {
         const body = await readJson(req);
         const repo = repoFromParam(body.repo ?? url.searchParams.get("repo"));
@@ -217,7 +220,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
         return json(201, out);
       }
       if (path === "/api/graph" && method === "GET")
-        return json(200, await getGraph(gh, repoFromParam(url.searchParams.get("repo"))));
+        return json(200, await getGraph(gh, repoFromParam(url.searchParams.get("repo")), privacy));
       if (path === "/api/events" && method === "GET") {
         const repo = repoFromParam(url.searchParams.get("repo"));
         // Доступ проверяем ДО подписки: иначе любой вошедший мог бы слушать,
@@ -243,7 +246,15 @@ export async function createApp(deps: AppDeps): Promise<App> {
         const rest = seg.slice(5);
 
         if (method === "GET" && (rest.length === 0 || (rest.length === 1 && rest[0] === "timeline"))) {
-          return json(200, await getTimeline(gh, repo, chatId));
+          return json(200, await getTimeline(gh, repo, chatId, privacy));
+        }
+        if (rest.length === 1 && rest[0] === "privacy" && method === "POST") {
+          await gh.getRepo(repo);
+          const pull = await gh.findChatPull(repo, chatId);
+          if (!pull) throw notFound("Чат не найден");
+          const body = await readJson(req);
+          if (typeof body.text !== "string" || body.text.length > 60_000) throw badRequest("Нужен текст до 60000 знаков");
+          return json(200, await privacy.scan(body.text));
         }
         if (rest.length === 1 && rest[0] === "dispatch" && method === "GET") {
           await gh.getRepo(repo);
@@ -282,12 +293,14 @@ export async function createApp(deps: AppDeps): Promise<App> {
           } catch {
             throw badRequest("Нужен один @адресат и не больше одного @@участника");
           }
+          if (typeof body.text !== "string" || !body.text.trim() || body.text.length > 60_000) throw badRequest("Нужен текст до 60000 знаков");
+          body.text = (await privacy.scan(body.text.replace(/\r\n?/g, "\n").trim())).text;
           let delivery: { id: string; author: string } | undefined;
           let chainId: string | undefined;
           if (route.length) {
             if (typeof body.request_id !== "string" || !/^[A-Za-z0-9_-]{8,80}$/.test(body.request_id))
               throw badRequest("Нужен request_id для адресного сообщения");
-            const timeline = await getTimeline(gh, repo, chatId);
+            const timeline = await getTimeline(gh, repo, chatId, privacy);
             if (!timeline.chat.can_push || timeline.chat.state !== "open")
               throw forbidden("Чат закрыт или доступен только для чтения");
             if (route.some((alias) => canonicalMention(alias) === "chatgpt"))
@@ -371,7 +384,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
         }
         if (method === "POST" && rest.length === 3 && rest[0] === "agent-prs" && rest[2] === "accept") {
           if (!NUMBER_RE.test(rest[1]!)) throw badRequest("Неверный номер PR");
-          return json(200, await acceptAgentPr(gh, repo, chatId, Number(rest[1])));
+          return json(200, await acceptAgentPr(gh, repo, chatId, Number(rest[1]), privacy));
         }
       }
       throw notFound("Такого адреса в API нет");
@@ -396,11 +409,11 @@ export async function createApp(deps: AppDeps): Promise<App> {
     const user = await gh.getUser();
     if (!isLoginAllowed(config, user.login)) throw forbidden("Вход закрыт");
     const body = await readJson(req);
-    const ctx: ChatCtx = { gh, user: { login: user.login, id: user.id } };
+    const ctx: ChatCtx = { gh, user: { login: user.login, id: user.id }, privacy };
     if (path === "/api/agent/register") {
       const repo = repoFromParam(body.repo);
       if (typeof body.chat_id !== "string" || !isChatId(body.chat_id)) throw badRequest("Неверный чат");
-      const data = await getTimeline(gh, repo, body.chat_id);
+      const data = await getTimeline(gh, repo, body.chat_id, privacy);
       if (!data.chat.can_push || data.chat.state !== "open") throw forbidden("Чат закрыт или недоступен для записи");
       return json(
         200,
@@ -434,8 +447,8 @@ export async function createApp(deps: AppDeps): Promise<App> {
       if (!task) return json(200, { task: null });
       const chain = dispatch.chain(task.chain_id, user.id)!;
       return json(200, {
-        task,
-        prompt: chain.prompt,
+        task: await privacy.object(task),
+        prompt: (await privacy.scan(chain.prompt)).text,
         repo: session.repo,
         chat_id: session.chat,
         url: `${config.publicUrl}/${session.repo}/${session.chat}`,
@@ -447,13 +460,14 @@ export async function createApp(deps: AppDeps): Promise<App> {
       dispatch.heartbeat(task.id, session.id, String(body.claim));
       return json(200, { ok: true });
     }
-    if (path === "/api/agent/context") return json(200, await getTimeline(gh, repo, session.chat));
+    if (path === "/api/agent/context") return json(200, await getTimeline(gh, repo, session.chat, privacy));
     if (path === "/api/agent/complete") {
       if (typeof body.text !== "string" || !body.text.trim() || body.text.length > 60_000)
         throw badRequest("Нужен ответ до 60000 знаков");
       // Одинаковый id и сохранённый текст делают повтор после обрыва безопасным.
-      dispatch.prepareAnswer(task.id, session.id, String(body.claim), body.text.trim());
-      const timeline = await getTimeline(gh, repo, session.chat);
+      body.text = (await privacy.scan(body.text.replace(/\r\n?/g, "\n").trim())).text;
+      dispatch.prepareAnswer(task.id, session.id, String(body.claim), body.text as string);
+      const timeline = await getTimeline(gh, repo, session.chat, privacy);
       if (timeline.chat.state !== "open") throw new HttpError(409, "conflict", "Чат закрыт");
       const item = await postMessage(
         ctx,

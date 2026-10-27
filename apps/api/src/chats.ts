@@ -56,7 +56,11 @@ import { draftForkContext, readInherited, type ForkContextDraft } from "./fork-c
 import { HttpError, badRequest, forbidden, notFound } from "./errors.ts";
 import { GitHubError, mapLimit, type ChatPull, type GhRepo, type GitHubClient, type RepoRef } from "./github.ts";
 
+import { defaultPrivacy, type Privacy } from "./privacy.ts";
+import { cleanConversationFile } from "./privacy-files.ts";
+
 export interface ChatCtx {
+  privacy?: Privacy;
   gh: GitHubClient;
   user: { login: string; id: number };
   now?: () => Date;
@@ -98,9 +102,9 @@ function summaryOf(fullName: string, p: ChatPull): ChatSummary {
   };
 }
 
-export async function listChats(gh: GitHubClient, repo: RepoRef): Promise<ChatSummary[]> {
+export async function listChats(gh: GitHubClient, repo: RepoRef, privacy: Privacy = defaultPrivacy): Promise<ChatSummary[]> {
   const [info, pulls] = await Promise.all([gh.getRepo(repo), gh.listChatPulls(repo)]);
-  return pulls.map((p) => summaryOf(info.full_name, p));
+  return privacy.object(pulls.map((p) => summaryOf(info.full_name, p)));
 }
 
 export function participantsOf(items: TimelineItem[]): Participant[] {
@@ -186,7 +190,7 @@ async function outgoingOf(gh: GitHubClient, repo: RepoRef, chatId: string, paren
   return foldFiles(await gh.getDecisionFiles(repo, parentId)).filter((d) => d.from_chat === chatId);
 }
 
-export async function getTimeline(gh: GitHubClient, repo: RepoRef, chatId: string): Promise<TimelineResponse> {
+export async function getTimeline(gh: GitHubClient, repo: RepoRef, chatId: string, privacy: Privacy = defaultPrivacy): Promise<TimelineResponse> {
   const [info, pull] = await findPull(gh, repo, chatId);
   const [{ input, meta, store }, chats] = await Promise.all([loadTimelineInput(gh, repo, info, pull), gh.listChatPulls(repo)]);
   const items = buildTimeline(input);
@@ -196,7 +200,7 @@ export async function getTimeline(gh: GitHubClient, repo: RepoRef, chatId: strin
     parent ? readInherited(gh, repo, chatId, parent, chats, store) : null,
     parent ? outgoingOf(gh, repo, chatId, parent.chat_id) : [],
   ]);
-  return {
+  return privacy.object({
     chat: {
       ...summaryOf(info.full_name, pull),
       head_sha: pull.headSha,
@@ -210,7 +214,7 @@ export async function getTimeline(gh: GitHubClient, repo: RepoRef, chatId: strin
     decisions: foldFiles(input.decisions ?? []),
     outgoing,
     chat_store: store,
-  };
+  });
 }
 
 function graphDecision(d: Decision): GraphDecision {
@@ -225,7 +229,7 @@ function graphDecision(d: Decision): GraphDecision {
 // имён файлов, без чтения блобов, чтобы дерево строилось дёшево. Решениям
 // имени файла мало (статус — свёртка событий), но их единицы, а блобы
 // кешируются навсегда по sha.
-export async function getGraph(gh: GitHubClient, repo: RepoRef): Promise<GraphResponse> {
+export async function getGraph(gh: GitHubClient, repo: RepoRef, privacy: Privacy = defaultPrivacy): Promise<GraphResponse> {
   const [info, pulls] = await Promise.all([gh.getRepo(repo), gh.listChatPulls(repo)]);
   const recent = [...pulls].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0)).slice(0, GRAPH_MAX_CHATS);
   const chats = await mapLimit(recent, GRAPH_CONCURRENCY, async (p) => {
@@ -240,7 +244,7 @@ export async function getGraph(gh: GitHubClient, repo: RepoRef): Promise<GraphRe
     const decisions = foldFiles(await gh.getDecisionFiles(repo, p.chatId, branchForChat(p.chatId), 1)).map(graphDecision);
     return { ...summaryOf(info.full_name, p), messages: messages.sort(byTimeThenId), decisions };
   });
-  return { repo: info.full_name, chats };
+  return privacy.object({ repo: info.full_name, chats });
 }
 
 function normalizeTitle(raw: unknown, max = MAX_TITLE): string {
@@ -289,8 +293,10 @@ export async function createChat(
   const { gh } = ctx;
   const now = (ctx.now ?? (() => new Date()))();
   const rand = ctx.rand ?? randomSuffix;
-  const title = normalizeTitle(req.title);
-  const first = absent(req.first_message) ? undefined : normalizeText(req.first_message, "Первое сообщение");
+  const privacy = ctx.privacy ?? defaultPrivacy;
+  const title = (await privacy.scan(normalizeTitle(req.title))).text;
+  const first = absent(req.first_message) ? undefined : (await (ctx.privacy ?? defaultPrivacy).scan(normalizeText(req.first_message, "Первое сообщение"))).text;
+  if (fork) fork = await privacy.object(fork);
   const login = authorOf(ctx.user.login);
 
   const info = await gh.getRepo(repo);
@@ -394,7 +400,7 @@ export async function createChat(
     }
   } catch (e) {
     // Без PR ветка — сирота: чата в списке нет, а ветка мусорит. Удаляем.
-    await gh.deleteBranch(repo, branch).catch((err) => console.error(`создание чата: не удалось удалить ветку ${branch}`, err));
+    await gh.deleteBranch(repo, branch).catch((err) => console.error("создание чата: не удалось удалить ветку"));
     throw e;
   }
 
@@ -404,7 +410,7 @@ export async function createChat(
   } catch (e) {
     // Метка — подсказка людям на GitHub; чат определяется веткой и блоком в
     // теле PR, поэтому без метки он всё равно работает.
-    console.warn(`создание чата: метку ${LABEL.name} поставить не удалось`, e);
+    console.warn("создание чата: метку поставить не удалось");
   }
 
   return {
@@ -444,7 +450,7 @@ export async function forkChat(
     reason = req.reason.replace(/\r\n?/g, "\n").trim() || undefined;
     if (reason && reason.length > MAX_REASON) throw badRequest(`Причина Fork длиннее ${MAX_REASON} символов`);
   }
-  const first = absent(req.first_message) ? undefined : normalizeText(req.first_message, "Первое сообщение");
+  const first = absent(req.first_message) ? undefined : (await (ctx.privacy ?? defaultPrivacy).scan(normalizeText(req.first_message, "Первое сообщение"))).text;
   // Логин, негодный в авторы, отвергаем сразу, а не после чтения ленты родителя.
   authorOf(ctx.user.login);
 
@@ -470,7 +476,7 @@ export async function postMessage(
   const { gh } = ctx;
   const clock = ctx.now ?? (() => new Date());
   const rand = ctx.rand ?? randomSuffix;
-  const text = normalizeText(req.text, "Сообщение");
+  const text = (await (ctx.privacy ?? defaultPrivacy).scan(normalizeText(req.text, "Сообщение"))).text;
   let replyTo: string | undefined;
   if (req.reply_to !== undefined && req.reply_to !== null && req.reply_to !== "") {
     if (typeof req.reply_to !== "string" || !parseMessageId(req.reply_to)) throw badRequest("reply_to — не id сообщения");
@@ -533,7 +539,7 @@ function orderItem(m: MessageItem): MessageItem {
 // «Принять в чат» сливает PR агента в ветку чата. Кнопка нажимается
 // человеком с правом записи, поэтому проверяем строго: только новые
 // файлы-сообщения этого чата, и сливаем ровно тот head, который проверили.
-export async function acceptAgentPr(gh: GitHubClient, repo: RepoRef, chatId: string, number: number): Promise<AcceptAgentPrResponse> {
+export async function acceptAgentPr(gh: GitHubClient, repo: RepoRef, chatId: string, number: number, privacy: Privacy = defaultPrivacy): Promise<AcceptAgentPrResponse> {
   if (!Number.isInteger(number) || number <= 0) throw badRequest("Номер PR — положительное целое");
   const branch = branchForChat(chatId);
   const store = await gh.chatStore(repo, branch);
@@ -550,6 +556,11 @@ export async function acceptAgentPr(gh: GitHubClient, repo: RepoRef, chatId: str
     throw badRequest(`PR #${number} меняет не только новые сообщения чата: ${list}. Такой PR принимают вручную на GitHub.`);
   }
 
+  for (const file of files) {
+    const content = await gh.getFileText(repo, file.filename, headSha);
+    if (content === null || await cleanConversationFile(privacy, file.filename, content) !== content)
+      throw forbidden("PR содержит чувствительные данные. Отправьте очищенные сообщения через CHAT.0110; исходный PR уже опубликован в GitHub.");
+  }
   // Агент мог дописать в PR что-то ещё, пока мы смотрели файлы.
   const again = await gh.getPull(repo, number);
   if (again?.head?.sha !== headSha) throw new HttpError(409, "conflict", `PR #${number} изменился во время проверки — откройте чат заново`);
@@ -687,7 +698,7 @@ export async function createDecision(
   const { gh } = ctx;
   const now = (ctx.now ?? (() => new Date()))();
   const rand = ctx.rand ?? randomSuffix;
-  const p = normalizeProposal(req);
+  const p = await (ctx.privacy ?? defaultPrivacy).object(normalizeProposal(req));
   if (req.accept !== undefined && req.accept !== null && typeof req.accept !== "boolean") throw badRequest("accept — true или false");
   const accept = req.accept === true;
   const login = authorOf(ctx.user.login);
@@ -740,7 +751,7 @@ export async function decisionAction(
   const rand = ctx.rand ?? randomSuffix;
   if (!parseMessageId(decisionId)) throw badRequest("Неверный id решения");
   if (!isDecisionVerb(action)) throw badRequest("Неизвестное действие с решением: accept, reject, reopen или discuss");
-  const text = decisionText(req.text, "Комментарий к решению");
+  const text = (await (ctx.privacy ?? defaultPrivacy).scan(decisionText(req.text, "Комментарий к решению"))).text;
   if (action === "discuss" && !text) throw badRequest("Обсуждение: пустой текст");
   const login = authorOf(ctx.user.login);
   requireHumanVerdict(login, action);
@@ -771,7 +782,7 @@ export async function decisionAction(
         content: serializeDecisionFile(ev),
         branch: branchForChat(chatId),
       });
-      return decisionOf([...events, reread(ev)], d.id);
+      return (ctx.privacy ?? defaultPrivacy).object(decisionOf([...events, reread(ev)], d.id));
     } catch (e) {
       // Новый файл не конфликтует по содержимому: 409 — лишь сдвиг головы.
       if (attempt < 3 && e instanceof GitHubError && e.ghStatus === 409) continue;
@@ -786,7 +797,7 @@ export async function proposeToParent(ctx: ChatCtx, repo: RepoRef, forkId: strin
   const { gh } = ctx;
   const clock = ctx.now ?? (() => new Date());
   const rand = ctx.rand ?? randomSuffix;
-  const p = normalizeProposal(req);
+  const p = await (ctx.privacy ?? defaultPrivacy).object(normalizeProposal(req));
   const login = authorOf(ctx.user.login);
 
   const forkRef = branchForChat(forkId);

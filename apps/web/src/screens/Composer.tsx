@@ -1,3 +1,4 @@
+import { PrivacyPanel } from "./PrivacyPanel.tsx";
 import { mentionRoute, resolveMention, suggestMentions, type DispatchView } from "@chat0110/chat-protocol";
 import { dispatchRequest, dispatchText } from "../dispatch.ts";
 import type { MessageItem } from "@chat0110/chat-protocol";
@@ -15,13 +16,14 @@ interface ComposerProps {
   canPush: boolean;
   reply: MessageItem | null;
   onClearReply: () => void;
-  onSend: (text: string, replyTo?: string) => void;
+  onSend: (text: string, replyTo?: string) => void | Promise<boolean>;
   phone: boolean;
   /** Растёт, когда нажали «Ответить», — повод поставить курсор в поле. */
   focusTick: number;
 }
 
 export function Composer(p: ComposerProps) {
+  const [sending, setSending] = useState(false);
   const [text, setText] = useState(() => drafts.get(p.chatKey) ?? "");
   const area = useRef<HTMLTextAreaElement>(null);
   const [dispatch, setDispatch] = useState<DispatchView | null>(null);
@@ -163,7 +165,7 @@ export function Composer(p: ComposerProps) {
             </span>
             <button
               type="button"
-              disabled={!p.canPush}
+              disabled={!p.canPush || sending}
               className="min-h-9 shrink-0 border-0 bg-transparent text-action-ink"
               onClick={() => void dispatchRequest(p.chatKey, chain.id).then(setDispatch, () => setStopError(true))}
             >
@@ -198,12 +200,14 @@ export function Composer(p: ComposerProps) {
     else drafts.delete(p.chatKey);
   };
 
-  const submit = () => {
+  const submit = async () => {
     const value = text.trim();
-    if (!value || !p.canPush || routingError) return;
-    p.onSend(value, p.reply?.id);
-    update("");
-    p.onClearReply();
+    if (!value || !p.canPush || routingError || sending) return;
+    setSending(true);
+    try {
+      const sent = await p.onSend(value, p.reply?.id);
+      if (sent !== false) { update(""); p.onClearReply(); }
+    } finally { setSending(false); }
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -241,7 +245,7 @@ export function Composer(p: ComposerProps) {
         ref={area}
         rows={p.phone ? 1 : 3}
         value={text}
-        disabled={!p.canPush}
+        disabled={!p.canPush || sending}
         placeholder={s.composer.placeholder}
         onChange={(e) => {
           update(e.target.value);
@@ -270,10 +274,11 @@ export function Composer(p: ComposerProps) {
       >
         {replyChip}
         {routePanel}
+        <PrivacyPanel chatKey={p.chatKey} text={text} onApply={update} />
         {!p.canPush ? <p className="m-0 px-1 text-cap text-ink-2">{s.composer.readOnly}</p> : null}
         <div className="flex items-end gap-2.5">
           {field}
-          <ActionRound type="submit" aria-label={s.composer.send} disabled={!p.canPush || !!routingError} />
+          <ActionRound type="submit" aria-label={s.composer.send} disabled={!p.canPush || !!routingError || sending} />
         </div>
       </form>
     );
@@ -288,10 +293,11 @@ export function Composer(p: ComposerProps) {
       {replyChip}
       {routePanel}
       {field}
+      <PrivacyPanel chatKey={p.chatKey} text={text} onApply={update} />
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <span className="px-1 text-cap text-ink-2">{p.canPush ? s.composer.hint(p.branch) : s.composer.readOnly}</span>
-        <ActionKey type="submit" disabled={!p.canPush || !!routingError}>
-          {s.composer.send}
+        <ActionKey type="submit" disabled={!p.canPush || !!routingError || sending}>
+          {sending ? (s.locale === "en" ? "Checking…" : "Проверяем…") : s.composer.send}
         </ActionKey>
       </div>
     </Body>
