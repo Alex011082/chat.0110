@@ -277,7 +277,9 @@ export class McpOAuth {
       // У HTML-форм no-referrer обнуляет Origin даже при POST на свой домен.
       // same-origin сохраняет проверку CSRF, не раскрывая URL сайту клиента.
       h.set("Referrer-Policy", "same-origin");
-      h.set("Content-Security-Policy", "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+      // form-action проверяет и переход после POST. Callback уже проверен
+      // по allowlist и регистрации клиента; остальные внешние цели запрещены.
+      h.set("Content-Security-Policy", `default-src 'none'; form-action 'self' ${p.redirect_uri}; frame-ancestors 'none'; base-uri 'none'`);
       h.set("X-Frame-Options", "DENY"); h.append("Set-Cookie", this.consentCookieValue(binding));
       response = new Response(html, { headers: h });
     } else {

@@ -120,6 +120,21 @@ test("HTML-согласие сохраняет Origin своей формы и �
   expect(approved.headers.get("Referrer-Policy")).toBe("no-referrer");
 });
 
+test("CSP формы разрешает возврат только к проверенному callback выбранного клиента", async () => {
+  const f = await setup();
+  for (const callback of [CALLBACK, "https://claude.ai/api/mcp/auth_callback", "http://127.0.0.1:4368/callback"]) {
+    const client = (await f.register(callback)).body.client_id;
+    const params = f.authorizeParams(client); params.set("redirect_uri", callback);
+    const consent = await f.consent(params);
+    expect(consent.res.status).toBe(200);
+    // CSP form-action применяется также к 302 после POST: одного 'self'
+    // недостаточно, иначе код выдан, но браузер не возвращается к клиенту.
+    expect(consent.res.headers.get("Content-Security-Policy")).toBe(
+      `default-src 'none'; form-action 'self' ${callback}; frame-ancestors 'none'; base-uri 'none'`,
+    );
+  }
+});
+
 test("код одноразовый, проверяет PKCE, клиента, redirect и resource", async () => {
   const f = await setup(); const client = (await f.register()).body.client_id;
   const authorization = await f.approve(f.authorizeParams(client));
