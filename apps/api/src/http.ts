@@ -178,7 +178,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
 
     const res = await (async (): Promise<Response> => {
       if (path === "/api/connections" && method === "GET")
-        return json(200, { chatgpt: events.status(`chatgpt:${session.uid}`) });
+        return json(200, { chatgpt: { ...events.status(`chatgpt:${session.uid}`), authorized: oauth.hasAuthorization(`chatgpt:${session.uid}`, "chatgpt.com") } });
       if (path === "/api/connections/disconnect" && method === "POST") {
         events.disconnect(`chatgpt:${session.uid}`);
         await oauth.disconnect(`chatgpt:${session.uid}`);

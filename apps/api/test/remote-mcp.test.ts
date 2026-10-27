@@ -192,3 +192,76 @@ test("удалённый MCP требует OAuth, выдаёт события �
     db.close();
   }
 });
+
+test("ожидание конкретной сессии не забирает задания другой сессии того же ИИ", async () => {
+  const f = await setup();
+  try {
+    const code = f.dispatch.register(
+      7,
+      repo,
+      chat,
+      "remote:chatgpt:7:claude-code",
+      "claude-code",
+      "Claude Code",
+      "claude",
+      "",
+    );
+    const work = f.dispatch.register(
+      7,
+      repo,
+      chat,
+      "remote:chatgpt:7:claude-work",
+      "claude-work",
+      "Claude Cowork",
+      "claude",
+      "",
+    );
+    f.dispatch.enqueue(
+      "claude-code-task",
+      7,
+      repo,
+      chat,
+      "20261023T100300Z-alex011082-q9w1",
+      "@claude-code проверь",
+      [code.id],
+    );
+    f.dispatch.enqueue(
+      "claude-work-task",
+      7,
+      repo,
+      chat,
+      "20261023T100400Z-alex011082-q9w2",
+      "@claude-work обсуди",
+      [work.id],
+    );
+    const response = await f.remote.handle(
+      f.request(
+        "tools/call",
+        {
+          name: "chat0110_pending",
+          arguments: { author: "claude", session_id: code.id },
+        },
+        f.token,
+      ),
+    );
+    const body = await response.json();
+    expect(body.result.structuredContent.turns).toHaveLength(1);
+    expect(
+      f.dispatch.ownedTask(body.result.structuredContent.turns[0].id, 7)
+        .session_id,
+    ).toBe(code.id);
+    const other = await f.remote.handle(
+      f.request(
+        "tools/call",
+        {
+          name: "chat0110_pending",
+          arguments: { author: "claude", session_id: "missing-session" },
+        },
+        f.token,
+      ),
+    );
+    expect((await other.json()).result.structuredContent.turns).toEqual([]);
+  } finally {
+    f.db.close();
+  }
+});

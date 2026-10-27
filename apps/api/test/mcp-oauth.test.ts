@@ -130,7 +130,7 @@ test("CSP формы разрешает возврат только к пров�
     // CSP form-action применяется также к 302 после POST: одного 'self'
     // недостаточно, иначе код выдан, но браузер не возвращается к клиенту.
     expect(consent.res.headers.get("Content-Security-Policy")).toBe(
-      `default-src 'none'; form-action 'self' ${callback}; frame-ancestors 'none'; base-uri 'none'`,
+      `default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; form-action 'self' ${callback}; frame-ancestors 'none'; base-uri 'none'`,
     );
   }
 });
@@ -345,4 +345,49 @@ test("disconnect прекращает MCP, но оставляет свежую 
   f.clock.now = newest.rexp + 1;
   await f.register("https://chatgpt.com/connector/oauth/expiry-cleanup");
   expect(f.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM mcp_oauth_accounts").get()!.n).toBe(0);
+});
+
+test("согласие переводится без изменения OAuth-параметров и не требует JavaScript", async () => {
+  const f = await setup();
+  const client = (await f.register()).body.client_id;
+  const params = f.authorizeParams(client);
+  params.set("lang", "en");
+  const c = await f.consent(params);
+  expect(c.html).toContain('<html lang="en">');
+  expect(c.html).toContain("Connect ChatGPT");
+  expect(c.html).toContain('href="/oauth-consent.css"');
+  expect(c.html).toContain('name="lang" value="en"');
+  expect(c.html).not.toContain("<script");
+  expect(c.html).not.toContain("<style");
+  const ru = c.html
+    .match(/href="([^"]+)" lang="ru"/)?.[1]
+    ?.replaceAll("&amp;", "&");
+  const changed = new URL(ru!, ROOT);
+  expect(changed.searchParams.get("lang")).toBe("ru");
+  for (const [key, value] of f.authorizeParams(client))
+    expect(changed.searchParams.get(key)).toBe(value);
+  const body = new URLSearchParams(params);
+  body.set("consent_nonce", c.nonce);
+  body.set("decision", "allow");
+  const response = await f.handle("/oauth/authorize", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Origin: ROOT,
+      Cookie: f.cookie + "; " + c.consentCookie,
+    },
+    body,
+  });
+  expect(response.status).toBe(302);
+});
+
+test("статус отличает OAuth приложения от подписки на события и чужого клиента", async () => {
+  const f = await setup();
+  expect(f.oauth.hasAuthorization("chatgpt:7", "chatgpt.com")).toBe(false);
+  await f.grant();
+  expect(f.oauth.hasAuthorization("chatgpt:7", "chatgpt.com")).toBe(true);
+  expect(f.oauth.hasAuthorization("chatgpt:7", "claude.ai")).toBe(false);
+  expect(f.oauth.hasAuthorization("chatgpt:8", "chatgpt.com")).toBe(false);
+  await f.oauth.disconnect("chatgpt:7");
+  expect(f.oauth.hasAuthorization("chatgpt:7", "chatgpt.com")).toBe(false);
 });

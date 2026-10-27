@@ -50,7 +50,7 @@ export const REMOTE_TOOLS = [
     name: "chat0110_pending",
     description:
       "List addressed turns ready for the connected agent. No model API calls. wait=true holds the request up to 25 seconds. Empty results do not mean a permanent subscription.",
-    inputSchema: schema({ author: str, wait: { type: "boolean" } }),
+    inputSchema: schema({ author: str, session_id: str, wait: { type: "boolean" } }),
     annotations: annotations(true),
     ...policy,
   },
@@ -189,7 +189,7 @@ export function createRemoteMcp(o: Options) {
         next:
           author === "chatgpt"
             ? "Subscribe to chat0110.turn.ready with recipient chatgpt for automatic delivery."
-            : "Call chat0110_pending with wait=true while this session is active.",
+            : "Call chat0110_pending with this session_id and wait=true while this session is active.",
       };
     }
     if (name === "chat0110_pending") {
@@ -197,7 +197,7 @@ export function createRemoteMcp(o: Options) {
       const until = Date.now() + (args.wait === true ? 25_000 : 0);
       let ready;
       do {
-        ready = dispatch.remoteReady(uid, author);
+        ready = dispatch.remoteReady(uid, author, typeof args.session_id === "string" ? args.session_id : null);
         if (ready.length || Date.now() >= until) break;
         await Bun.sleep(500);
       } while (true);

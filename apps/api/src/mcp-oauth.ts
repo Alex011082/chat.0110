@@ -1,5 +1,6 @@
 // OAuth выдаёт доступ только к нашему MCP. Токены GitHub не покидают сервер:
 // в SQLite лежит та же AES-GCM сессия, что используется для входа на сайт.
+import { consentPage, type ConsentLocale } from "./mcp-consent.ts";
 import type { Database } from "bun:sqlite";
 import { createHash, randomBytes } from "node:crypto";
 import { isLoginAllowed, type Config } from "./config.ts";
@@ -272,14 +273,29 @@ export class McpOAuth {
       const hidden = AUTH_KEYS.map((key) => `<input type="hidden" name="${key}" value="${escape(p[key])}">`).join("");
       const hostname = new URL(p.redirect_uri).hostname;
       const application = hostname === "chatgpt.com" ? "ChatGPT" : hostname.startsWith("claude.") ? "Claude" : hostname === "grok.com" ? "Grok" : "MCP-клиент на этом компьютере";
-      const html = `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Подключить ${application} — chat.0110</title><body><main><h1>Подключить ${application}</h1><p>Вы вошли как <strong>${escape(auth.session.login)}</strong>.</p><p>Подключение сможет читать ваши чаты, получать задания и писать ответы от имени подключённого ИИ в пределах ваших прав GitHub.</p><p>Адрес приложения: <code>${escape(p.redirect_uri)}</code></p><p>Срок доступа — до 30 дней. Подключение можно отозвать.</p><form method="post" action="/oauth/authorize">${hidden}<input type="hidden" name="consent_nonce" value="${nonce}"><button type="submit" name="decision" value="allow">Разрешить подключение</button> <button type="submit" name="decision" value="deny">Отмена</button></form></main></body></html>`;
+      const locale: ConsentLocale = params.get("lang") === "en" ? "en" : "ru";
+      const html = consentPage({
+        application,
+        login: auth.session.login,
+        callback: p.redirect_uri,
+        hidden,
+        nonce,
+        locale,
+        languageUrl: (lang) => {
+          const query = new URLSearchParams(
+            AUTH_KEYS.map((key) => [key, p[key]]),
+          );
+          query.set("lang", lang);
+          return "/oauth/authorize?" + query;
+        },
+      });
       const h = headers("text/html; charset=utf-8");
       // У HTML-форм no-referrer обнуляет Origin даже при POST на свой домен.
       // same-origin сохраняет проверку CSRF, не раскрывая URL сайту клиента.
       h.set("Referrer-Policy", "same-origin");
       // form-action проверяет и переход после POST. Callback уже проверен
       // по allowlist и регистрации клиента; остальные внешние цели запрещены.
-      h.set("Content-Security-Policy", `default-src 'none'; form-action 'self' ${p.redirect_uri}; frame-ancestors 'none'; base-uri 'none'`);
+      h.set("Content-Security-Policy", `default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; form-action 'self' ${p.redirect_uri}; frame-ancestors 'none'; base-uri 'none'`);
       h.set("X-Frame-Options", "DENY"); h.append("Set-Cookie", this.consentCookieValue(binding));
       response = new Response(html, { headers: h });
     } else {
@@ -411,6 +427,21 @@ export class McpOAuth {
   }
   private hasGrant(uid: number): boolean {
     return !!this.db.query("SELECT 1 FROM mcp_oauth_grants g JOIN mcp_oauth_clients c ON c.id = g.client_id WHERE g.uid = ? AND g.resource = ? AND g.expires > ? AND c.expires > ? LIMIT 1").get(uid, this.resource, this.now(), this.now());
+  }
+  hasAuthorization(connectionId: string, hostname: string): boolean {
+    const uid = this.connectionUid(connectionId);
+    if (uid === null) return false;
+    const clients = this.db
+      .query<
+        { redirects: string },
+        [number, string, number, number]
+      >("SELECT c.redirects FROM mcp_oauth_grants g JOIN mcp_oauth_clients c ON c.id = g.client_id WHERE g.uid = ? AND g.resource = ? AND g.expires > ? AND c.expires > ?")
+      .all(uid, this.resource, this.now(), this.now());
+    return clients.some((client) =>
+      (JSON.parse(client.redirects) as string[]).some(
+        (uri) => new URL(uri).hostname === hostname,
+      ),
+    );
   }
   async disconnect(connectionId: string): Promise<void> {
     const uid = this.connectionUid(connectionId); if (uid === null) return;
