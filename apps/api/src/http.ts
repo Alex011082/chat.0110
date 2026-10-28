@@ -1,4 +1,5 @@
-import { defaultPrivacy, type Privacy } from "./privacy.ts";
+import { Privacy } from "./privacy.ts";
+import { SqlitePrivacyCache } from "./privacy-cache.ts";
 import { Database } from "bun:sqlite";
 import { McpOAuth } from "./mcp-oauth.ts";
 import { McpEvents } from "./mcp-events.ts";
@@ -117,8 +118,8 @@ async function readJson(req: Request): Promise<Record<string, unknown>> {
 
 export async function createApp(deps: AppDeps): Promise<App> {
   const { config } = deps;
-  const privacy = deps.privacy ?? defaultPrivacy;
   const stateDb = deps.stateDb ?? new Database(":memory:");
+  const privacy = deps.privacy ?? new Privacy(undefined, new SqlitePrivacyCache(stateDb, config.cookieKey));
   const dispatch = deps.dispatch ?? new DispatchStore(stateDb);
   const fetcher = deps.fetch ?? fetch;
   const caches = deps.caches ?? createCaches();

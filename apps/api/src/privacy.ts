@@ -8,6 +8,10 @@ export type Category = (typeof CATEGORIES)[number];
 export interface Span { start: number; end: number; category: Category }
 export interface CleanText { text: string; counts: Partial<Record<Category, number>> }
 export type EntityScanner = (text: string) => Promise<Span[]>;
+export interface CheckedTextStore {
+  get(text: string): CleanText | null;
+  put(text: string, result: CleanText): void;
+}
 const MARKER = /\[(SECRET|EMAIL|PHONE|DOCUMENT|CARD|BANK_ACCOUNT|PERSON|ADDRESS)_(\d+)\]/g;
 const CONTENT = new Set(["text", "title", "body", "reason", "intro", "prompt", "answer", "diff_hunk", "excerpt", "summary", "path", "gaps"]);
 const METADATA = new Set(["id", "author", "actor", "created_by", "created_at", "updated_at", "chat_id", "reply_to", "decision", "source_messages", "from_chat", "supersedes", "superseded_by", "decided_by", "decided_at", "schema_version", "commit_sha", "head_sha", "message_id", "boundary_message_id", "origin_chat_id", "kind", "source", "state", "status", "action", "repo", "url", "branch"]);
@@ -81,7 +85,7 @@ export class Privacy {
   private cache = new Map<string, CleanText>();
   private inflight = new Map<string, Promise<CleanText>>();
   private key = randomBytes(32);
-  constructor(private entities: EntityScanner = new LocalEntities().scan) {}
+  constructor(private entities: EntityScanner = new LocalEntities().scan, private checked?: CheckedTextStore) {}
 
   async scan(text: string): Promise<CleanText> {
     if (!text) return { text, counts: {} };
@@ -89,6 +93,12 @@ export class Privacy {
     const hash = createHmac("sha256", this.key).update(text).digest("hex");
     const cached = this.cache.get(hash);
     if (cached) return { text: cached.text, counts: { ...cached.counts } };
+    let saved: CleanText | null = null;
+    try { saved = this.checked?.get(text) ?? null; } catch { /* При сбое кеша нужна полная проверка. */ }
+    if (saved) {
+      this.remember(hash, saved);
+      return { text: saved.text, counts: { ...saved.counts } };
+    }
     // Вкладки, MCP и повторный опрос делят одну проверку до заполнения кеша.
     // Иначе одна длинная история многократно занимает очередь локальной модели.
     let pending = this.inflight.get(hash);
@@ -107,9 +117,20 @@ export class Privacy {
     try { entities = await this.entities(first); } catch { throw privacyUnavailable(); }
     const safe = this.replace(first, entities);
     const result = { text: safe, counts: privacyCounts(safe) };
+    this.remember(hash, result);
+    // Дальнейшие границы получают уже очищенную строку. Её проверка также
+    // подтверждена нами: одни лишь placeholder от клиента таким правом не обладают.
+    this.remember(createHmac("sha256", this.key).update(safe).digest("hex"), result);
+    try {
+      this.checked?.put(text, result);
+      if (safe !== text) this.checked?.put(safe, result);
+    } catch { /* Проверка выполнена: недоступность кеша не отменяет её результат. */ }
+    return { text: result.text, counts: { ...result.counts } };
+  }
+
+  private remember(hash: string, result: CleanText): void {
     if (this.cache.size >= 512) this.cache.delete(this.cache.keys().next().value!);
     this.cache.set(hash, result);
-    return { text: result.text, counts: { ...result.counts } };
   }
 
   private replace(text: string, raw: Span[]): string {
