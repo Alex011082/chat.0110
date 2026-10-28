@@ -189,6 +189,7 @@ export interface CreateChatResponse {
 }
 
 export interface PostMessageRequest {
+  request_id?: string;
   text: string;
   reply_to?: string;
 }
@@ -203,6 +204,8 @@ export interface AcceptAgentPrResponse {
 }
 
 export type ApiErrorCode =
+  | "privacy_unavailable"
+  | "dispatch_cancelled"
   | "unauthorized"
   | "forbidden"
   | "not_found"

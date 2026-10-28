@@ -26,12 +26,14 @@ export const notFound = (message: string) => new HttpError(404, "not_found", mes
 export const unauthorized = (message = "Нужно войти через GitHub") => new HttpError(401, "unauthorized", message);
 
 const STATUS_BY_CODE: Record<ApiErrorCode, number> = {
+  privacy_unavailable: 503,
   unauthorized: 401,
   forbidden: 403,
   not_found: 404,
   bad_request: 400,
   rate_limited: 429,
   conflict: 409,
+  dispatch_cancelled: 409,
   github_error: 502,
 };
 

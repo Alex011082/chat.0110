@@ -1,3 +1,4 @@
+import { PrivacyNotice } from "./PrivacyPanel.tsx";
 import {
   isAgent,
   resolveAuthor,
@@ -78,7 +79,7 @@ export function Timeline(p: TimelineProps) {
     () => [...p.items, ...p.local.flatMap((e) => (e.item ? [e.item] : []))],
     [p.items, p.local],
   );
-  const groups = useMemo(() => groupByDay(blocks, blockTime, p.now), [blocks, p.now]);
+  const groups = useMemo(() => groupByDay(blocks, blockTime, p.now), [blocks, p.now, s.locale]);
   const forks = useMemo(
     () => groupForks(p.forks, known.flatMap((i) => (i.kind === "message" ? [i.id] : []))),
     [p.forks, known],
@@ -263,7 +264,7 @@ function ForkOrigin({
   const titles = new Map(ancestors.map((a) => [a.chat_id, a.title]));
   const groups = useMemo(
     () => groupByDay(inherited?.items ?? [], (m) => m.created_at, now),
-    [inherited, now],
+    [inherited, now, s.locale],
   );
   let lastOrigin: string | undefined;
   return (
@@ -349,6 +350,7 @@ function InheritedMessage({ m, point, origin }: { m: MessageItem; point: boolean
           ) : null}
         </div>
         <Markdown text={m.text} />
+        <PrivacyNotice text={m.text} />
       </div>
     </article>
   );
@@ -479,6 +481,7 @@ function Message({ m, first, published, ctx }: { m: MessageItem; first: boolean;
         </div>
         {reply ? <span className="text-cap text-ink-2">{replyLine(reply)}</span> : null}
         <Markdown text={m.text} />
+        <PrivacyNotice text={m.text} />
         <div className="flex flex-wrap gap-4">
           <TextButton onClick={() => ctx.onReply(m)}>{s.timeline.reply}</TextButton>
           {m.url ? (

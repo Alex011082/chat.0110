@@ -14,11 +14,15 @@ Environment=CHAT0110_PUBLIC_URL=https://chat.0110.digital
 Environment=CHAT0110_WEB_DIST=/opt/chat0110/current/apps/web/dist
 # Файловая система только для чтения, поэтому кеш транспиляции Bun выключен.
 Environment=BUN_RUNTIME_TRANSPILER_CACHE_PATH=0
+# Модель работает offline; кеш содержит только открытые веса и токенизатор.
+Environment=HF_HOME=/var/lib/chat0110/privacy-cache
 ExecStart=/usr/local/bin/bun /opt/chat0110/current/apps/api/src/main.ts
 Restart=always
 RestartSec=3
 NoNewPrivileges=true
 PrivateTmp=true
+StateDirectory=chat0110
+StateDirectoryMode=0700
 ProtectSystem=strict
 ProtectHome=true
 

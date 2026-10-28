@@ -1,3 +1,4 @@
+import { testPrivacy } from "./privacy-fixture.ts";
 import { describe, expect, test } from "bun:test";
 import { PROTOCOL_JSON, SCAFFOLD } from "@chat0110/chat-protocol";
 import { HttpError } from "../src/errors.ts";
@@ -74,7 +75,7 @@ describe("перенос чатов", () => {
     expect(before.items.map((item) => item.status)).toEqual(["pending"]);
     expect(before.items[0]!.created).toEqual([]);
 
-    const done = await migrateChats(client(fake), REPO);
+    const done = await migrateChats(client(fake), REPO, testPrivacy);
     expect(done.items[0]!.status).toBe("migrated");
     expect(done.items[0]!.number).toBe(5);
     expect(done.items[0]!.url).toBe("https://github.com/Alex011082/chat.0110/pull/5");
@@ -99,7 +100,7 @@ describe("перенос чатов", () => {
     fake.on("GET", `${R}/contents/Chat/conversations/${CHAT}/chat.json`, file(JSON));
     fake.on("GET", `${R}/contents/Chat/conversations/${CHAT}/messages/${A}.md`, file(MSG));
     for (const item of SCAFFOLD) fake.on("GET", `${R}/contents/${item.path}`, file(item.content));
-    const done = await migrateChats(client(fake), REPO);
+    const done = await migrateChats(client(fake), REPO, testPrivacy);
     expect(done.items[0]!.status).toBe("migrated");
     expect(done.items[0]!.created).toEqual([]);
     expect(fake.find("POST", `${R}/git/trees`).length).toBe(0);
@@ -108,7 +109,7 @@ describe("перенос чатов", () => {
   test("другая копия останавливает запись", async () => {
     const fake = legacy(new FakeGitHub());
     fake.on("GET", `${R}/contents/Chat/conversations/${CHAT}/messages/${A}.md`, file("другой\n"));
-    const done = await migrateChats(client(fake), REPO);
+    const done = await migrateChats(client(fake), REPO, testPrivacy);
     expect(done.items[0]!.status).toBe("conflict");
     expect(done.items[0]!.conflicts).toContain(`Chat/conversations/${CHAT}/messages/${A}.md`);
     expect(fake.find("POST", `${R}/git/trees`).length).toBe(0);
@@ -116,7 +117,7 @@ describe("перенос чатов", () => {
 
   test("без права записи коммита нет", async () => {
     const fake = new FakeGitHub().on("GET", R, { body: repoBody(false) });
-    const err = await migrateChats(client(fake), REPO).then(
+    const err = await migrateChats(client(fake), REPO, testPrivacy).then(
       () => null,
       (e: unknown) => e,
     );
@@ -147,4 +148,11 @@ describe("перенос чатов", () => {
     expect(await gh.getBlob(REPO, head[0]!.sha)).toBe(MSG);
     expect(head[0]!.path.startsWith("Chat/conversations/")).toBe(true);
   });
+});
+
+
+test("перенос старого чата с секретом не создаёт новую копию в GitHub", async () => {
+  const fake = legacy(new FakeGitHub()).on("GET", `${R}/git/blobs/blob-msg`, { body: { content: b64(MSG + "password=private-example-value"), encoding: "base64" } });
+  await expect(migrateChats(client(fake), REPO, testPrivacy)).rejects.toMatchObject({ code: "forbidden" });
+  expect(fake.find("POST", /git\/trees/)).toHaveLength(0);
 });

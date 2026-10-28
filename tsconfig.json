@@ -12,5 +12,5 @@
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["packages/*/src", "packages/*/test", "apps/api/src", "apps/api/test"]
+  "include": ["packages/*/src", "packages/*/test", "apps/api/src", "apps/api/test", "apps/cli/src/connector.ts", "apps/cli/src/connector-state.ts", "apps/cli/test/connector-state.test.ts"]
 }

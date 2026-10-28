@@ -1,3 +1,4 @@
+import { testPrivacy } from "./privacy-fixture.ts";
 import { describe, expect, test } from "bun:test";
 import { PROTOCOL_JSON, SCAFFOLD } from "@chat0110/chat-protocol";
 import { activateChat, activationStatus } from "../src/activate.ts";
@@ -26,6 +27,7 @@ function ctx(fake: FakeGitHub) {
   return {
     gh: client(fake),
     user: { login: "Alex011082", id: 7 },
+    privacy: testPrivacy,
     now: () => new Date("2026-10-26T12:00:03.000Z"),
     rand: () => "ab12",
   };

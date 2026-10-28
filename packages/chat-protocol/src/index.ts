@@ -9,3 +9,6 @@ export * from "./layout.ts";
 export * from "./migrate.ts";
 export * from "./fork-context.ts";
 export * from "./agents-v2.ts";
+export * from "./mentions.ts";
+export * from "./mention-aliases.ts";
+export * from "./privacy.ts";

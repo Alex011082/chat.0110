@@ -1,3 +1,5 @@
+import { RefreshQueue } from "../lib/refresh.ts";
+import { checkPrivacy } from "../privacy.ts";
 import type { AppConfig, ChatActivation, ChatMigration, ChatSummary, Decision, GraphResponse, Me, MessageItem, RepoInfo, TimelineResponse } from "@chat0110/chat-protocol";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, ApiFailure, errorText } from "../api.ts";
@@ -131,17 +133,25 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
 
   // --- Лента открытого чата ----------------------------------------------------------
   const tlSeq = useRef(0);
+  const tlRefresh = useRef(new RefreshQueue());
+  const activeChatKey = useRef(chatKey);
+  activeChatKey.current = chatKey;
   const loadTimeline = useCallback(async () => {
     if (!repoFull || !route.chatId || !chatKey) return;
-    const seq = ++tlSeq.current;
-    try {
-      const data = await api().timeline(repoFull, route.chatId);
-      if (seq !== tlSeq.current) return;
-      setTl({ key: chatKey, data, error: null, syncedAt: Date.now() });
-    } catch (e) {
-      if (seq !== tlSeq.current) return;
-      setTl((t) => (t.key === chatKey ? { ...t, error: asFailure(e) } : { ...NO_TIMELINE, key: chatKey, error: asFailure(e) }));
-    }
+    const chatId = route.chatId;
+    await tlRefresh.current.run(chatKey, async () => {
+      // Отложенный опрос старого чата не должен вытеснять уже открытый новый.
+      if (activeChatKey.current !== chatKey) return;
+      const seq = ++tlSeq.current;
+      try {
+        const data = await api().timeline(repoFull, chatId);
+        if (seq !== tlSeq.current || activeChatKey.current !== chatKey) return;
+        setTl({ key: chatKey, data, error: null, syncedAt: Date.now() });
+      } catch (e) {
+        if (seq !== tlSeq.current || activeChatKey.current !== chatKey) return;
+        setTl((t) => (t.key === chatKey ? { ...t, error: asFailure(e) } : { ...NO_TIMELINE, key: chatKey, error: asFailure(e) }));
+      }
+    });
   }, [repoFull, route.chatId, chatKey]);
   useEffect(() => {
     setReply(null);
@@ -239,8 +249,8 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
     async (key: string, repo: string, chatId: string, entry: LocalEntry) => {
       try {
         const req = entry.reply_to ? { text: entry.text, reply_to: entry.reply_to } : { text: entry.text };
-        const { item } = await api().postMessage(repo, chatId, req);
-        patchEntry(key, entry.localId, { status: "published", item, error: undefined });
+        const { item } = await api().postMessage(repo, chatId, { ...req, request_id: entry.localId });
+        patchEntry(key, entry.localId, { status: "published", text: item.text, item, error: undefined });
         if (latest.current.open?.chat_id === chatId) void latest.current.loadTimeline();
       } catch (e) {
         patchEntry(key, entry.localId, { status: "error", error: errorText(e) });
@@ -249,8 +259,10 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
     [patchEntry],
   );
 
-  const send = (text: string, replyTo?: string) => {
-    if (!repoFull || !route.chatId || !chatKey) return;
+  const send = async (text: string, replyTo?: string): Promise<boolean> => {
+    if (!repoFull || !route.chatId || !chatKey) return false;
+    try { text = (await checkPrivacy(chatKey, text)).text; }
+    catch (error) { setToast(error instanceof Error ? error.message : s.errors.generic); return false; }
     const entry: LocalEntry = {
       localId: newLocalId(),
       text,
@@ -260,6 +272,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
     };
     setOutbox((box) => ({ ...box, [chatKey]: [...(box[chatKey] ?? []), entry] }));
     void post(chatKey, repoFull, route.chatId, entry);
+    return true;
   };
 
   const retry = (localId: string) => {
@@ -504,7 +517,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
         phone={phone}
         onBack={phone ? toList : undefined}
         title={summary?.title ?? s.loading}
-        text={current.error ? errorText(current.error) : s.loading}
+        text={current.error ? errorText(current.error) : s.loadingHistory}
       />
     );
   } else {

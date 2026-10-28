@@ -1,3 +1,5 @@
+import { Privacy } from "../src/privacy.ts";
+import { testPrivacy } from "./privacy-fixture.ts";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { serializeDecisionFile } from "@chat0110/chat-protocol";
 import { createHmac } from "node:crypto";
@@ -9,6 +11,7 @@ import { createApp } from "../src/http.ts";
 import { SessionStore, importCookieKey, type SessionData } from "../src/session.ts";
 import { SseHub } from "../src/sse.ts";
 import { FakeGitHub } from "./fake-github.ts";
+import { DispatchStore } from "../src/dispatch.ts";
 
 const PUBLIC = "https://chat.0110.digital";
 const R = "/repos/Alex011082/chat.0110";
@@ -25,7 +28,7 @@ afterAll(() => rmSync(dist, { recursive: true, force: true }));
 
 const repoBody = { full_name: "Alex011082/chat.0110", name: "chat.0110", owner: { login: "Alex011082" }, private: false, default_branch: "main", permissions: { push: true } };
 
-async function setup(opts: { allowed?: string; webDist?: string } = {}) {
+async function setup(opts: { allowed?: string; webDist?: string; privacy?: Privacy } = {}) {
   const config = loadConfig({
     CHAT0110_PUBLIC_URL: PUBLIC,
     GITHUB_APP_CLIENT_ID: "cid",
@@ -41,10 +44,11 @@ async function setup(opts: { allowed?: string; webDist?: string } = {}) {
     .on("GET", R, { body: repoBody });
   const sessions = new SessionStore({ key: await importCookieKey(config.cookieKey), dev: false, clientId: "cid", clientSecret: "csec", fetch: fake.fetch });
   const hub = new SseHub();
-  const app = await createApp({ config, fetch: fake.fetch, sessions, hub, now: () => new Date("2026-10-23T10:02:03Z"), rand: () => "m3p8" });
+  const dispatch = new DispatchStore(":memory:");
+  const app = await createApp({ privacy: opts.privacy ?? testPrivacy, config, fetch: fake.fetch, sessions, hub, dispatch, now: () => new Date("2026-10-23T10:02:03Z"), rand: () => "m3p8" });
   const session: SessionData = { uid: 7, login: "Alex011082", at: "ghu_x", rt: "ghr_x", exp: Date.now() + 3600_000, rexp: Date.now() + 86400_000 };
   const cookie = (await sessions.cookieFor(session)).split(";")[0]!;
-  return { app, fake, cookie, sessions, hub };
+  return { app, fake, cookie, sessions, hub, dispatch };
 }
 
 const get = (path: string, cookie?: string) => new Request(PUBLIC + path, cookie ? { headers: { cookie } } : {});
@@ -52,6 +56,66 @@ const post = (path: string, body: unknown, headers: Record<string, string> = {})
   new Request(PUBLIC + path, { method: "POST", body: JSON.stringify(body), headers: { origin: PUBLIC, "content-type": "application/json", ...headers } });
 
 describe("маршруты", () => {
+  test("повтор обычного сообщения с request_id не дублирует GitHub", async () => {
+    const { app, cookie, fake } = await setup();
+    const files = new Map<string, string>();
+    fake.on("GET", /\/contents\/chats\/.+\/messages\//, (c) => files.has(c.url.pathname) ? { body: { content: files.get(c.url.pathname), encoding: "base64" } } : { status: 404 });
+    fake.on("PUT", /\/contents\/chats\/.+\/messages\//, (c) => { files.set(c.url.pathname, c.body.content); return { status: 201, body: { commit: { sha: "same", html_url: "url" } } }; });
+    const path = "/api/chats/Alex011082/chat.0110/20261023-k7q2/messages";
+    const payload = { text: "private@example.org", request_id: "privacy-plain-123" };
+    const a = await app(post(path, payload, { cookie }));
+    const b = await app(post(path, payload, { cookie }));
+    expect(a.status).toBe(201); expect(b.status).toBe(201);
+    expect(files.size).toBe(1);
+    expect((await a.json()).item.id).toBe((await b.json()).item.id);
+    expect((await app(post(path, { ...payload, text: "Другой текст" }, { cookie }))).status).toBe(409);
+  });
+  test("сбой защиты возвращает 503 до очереди и записи GitHub", async () => {
+    const { app, cookie, fake, dispatch } = await setup({ privacy: new Privacy(async () => { throw new Error("private scanner detail"); }) });
+    const response = await app(post("/api/chats/Alex011082/chat.0110/20261023-k7q2/messages", { text: "@чатжпт Проверка", request_id: "privacy-failure-1" }, { cookie }));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: "privacy_unavailable" });
+    expect(dispatch.chain("7:privacy-failure-1", 7)).toBeNull();
+    expect(fake.calls.some((c) => ["POST", "PUT", "PATCH"].includes(c.method))).toBe(false);
+  });
+  test("проверка текста требует доступ к чату и ничего не публикует", async () => {
+    const { app, cookie, fake } = await setup();
+    const path = "/api/chats/Alex011082/chat.0110/20261023-k7q2/privacy";
+    expect((await app(post(path, { text: "private@example.org" }))).status).toBe(401);
+    fake.on("GET", /\/pulls\?state=all&head=/, { body: [{
+      number: 1, title: "Chat", body: "<!-- chat0110\nchat_id: 20261023-k7q2\n-->", state: "open", draft: true,
+      created_at: "2026-10-23T00:00:00Z", updated_at: "2026-10-23T00:00:00Z", html_url: "url", user: { login: "Alex011082" },
+      head: { ref: "chat/20261023-k7q2", sha: "h", repo: { full_name: repoBody.full_name } }, base: { ref: "main" },
+    }] });
+    const response = await app(post(path, { text: "private@example.org" }, { cookie }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ text: "[EMAIL_1]", counts: { EMAIL: 1 } });
+    expect(fake.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  test("автоответы переключаются только у своей сессии в открытом чате с правом записи", async () => {
+    for (const scenario of ["ok", "owner", "chat", "repo", "readonly", "closed", "missing", "body"] as const) {
+      const { app, fake, cookie, dispatch } = await setup();
+      const agent = dispatch.register(scenario === "owner" ? 8 : 7, scenario === "repo" ? "other/repo" : "Alex011082/chat.0110", scenario === "chat" ? "20261023-abcd" : "20261023-k7q2", "local:claude", "claude", "Claude");
+      fake.on("GET", R, { body: { ...repoBody, permissions: { push: scenario !== "readonly" } } });
+      fake.on("GET", /\/pulls\?state=all&head=/, { body: scenario === "missing" ? [] : [{
+        number: 1, title: "Chat", body: "<!-- chat0110\nchat_id: 20261023-k7q2\n-->", state: scenario === "closed" ? "closed" : "open", draft: true,
+        created_at: "2026-10-23T00:00:00Z", updated_at: "2026-10-23T00:00:00Z", html_url: "url", user: { login: "Alex011082" },
+        head: { ref: "chat/20261023-k7q2", sha: "h", repo: { full_name: repoBody.full_name } }, base: { ref: "main" },
+      }] });
+      const response = await app(post("/api/chats/Alex011082/chat.0110/20261023-k7q2/auto-replies", { session_id: agent.id, enabled: scenario === "body" ? "false" : false }, { cookie }));
+      expect(response.status).toBe(scenario === "ok" ? 200 : scenario === "body" ? 400 : ["readonly", "closed"].includes(scenario) ? 403 : 404);
+      if (scenario === "ok") {
+        const result = await response.json();
+        expect(result.sessions.find((s: any) => s.id === agent.id)?.auto_enabled).toBe(false);
+        expect(result.chatgpt).toEqual({ authorized: false, connected: false, last_error: null });
+        expect(result.sessions.find((s: any) => s.author === "chatgpt")?.online).toBe(false);
+        const resumed = await app(post("/api/chats/Alex011082/chat.0110/20261023-k7q2/auto-replies", { session_id: agent.id, enabled: true }, { cookie }));
+        expect((await resumed.json()).sessions.find((s: any) => s.id === agent.id)?.auto_enabled).toBe(true);
+      } else expect(dispatch.session(agent.id, scenario === "owner" ? 8 : 7).auto_enabled).toBe(1);
+      dispatch.close();
+    }
+  });
   test("GET /health", async () => {
     const { app } = await setup();
     const res = await app(get("/health"));
@@ -346,4 +410,60 @@ describe("раздача интерфейса", () => {
     expect(res.status).toBe(503);
     expect(await res.text()).toContain("Интерфейс");
   });
+});
+
+test("адресное сообщение проходит Claude → Codex → Claude; повтор HTTP не дублирует Git", async () => {
+  const {app,cookie,fake,dispatch}=await setup();
+  const chat="20261023-k7q2";
+  const path=`/api/chats/Alex011082/chat.0110/${chat}`;
+  const files=new Map<string,string>();
+  const pr={number:5,title:"Test",body:`<!-- chat0110\nchat_id: ${chat}\nschema_version: 1\n-->`,state:"open",draft:true,html_url:"https://github.com/Alex011082/chat.0110/pull/5",created_at:"2026-10-23T00:00:00Z",updated_at:"2026-10-23T00:00:00Z",user:{login:"Alex011082"},head:{ref:`chat/${chat}`,sha:"head",repo:{full_name:"Alex011082/chat.0110"}},base:{ref:"main"}};
+  fake.on("GET",R.toLowerCase(),{body:repoBody}).on("GET",/\/repos\/alex011082\/chat\.0110\/pulls\?/i,c=>({body:c.url.searchParams.has("base")?[]:[pr]}))
+    .on("GET",/\/compare\//,{status:404})
+    .on("GET",/\/(issues|pulls)\/5\/(comments|reviews)/,{body:[]})
+    .on("GET",/\/contents\//,c=>{
+      const value=files.get(c.url.pathname.toLowerCase());
+      return value?{body:{content:Buffer.from(value).toString("base64")}}:{status:404};
+    })
+    .on("PUT",/\/contents\//,c=>{
+      if(files.has(c.url.pathname.toLowerCase()))return {status:422,body:{message:"exists"}};
+      files.set(c.url.pathname.toLowerCase(),Buffer.from(c.body.content,"base64").toString("utf8"));
+      return {status:201,body:{commit:{sha:"commit",html_url:"https://github.com/c/commit"}}};
+    });
+  const agent=async(method:string,body:unknown)=>{
+    const response=await app(new Request(`${PUBLIC}/api/agent/${method}`,{method:"POST",headers:{authorization:"Bearer test-user-token","content-type":"application/json"},body:JSON.stringify(body)}));
+    const result=await response.json();
+    expect(response.status).toBe(200);
+    return result;
+  };
+  const a=await agent("register",{repo:"Alex011082/chat.0110",chat_id:chat,session_id:"claude-instance",alias:"claude-work",name:"Claude",author:"claude",model:"sonnet"});
+  const b=await agent("register",{repo:"Alex011082/chat.0110",chat_id:chat,session_id:"codex-instance",alias:"codex-work",name:"Codex",author:"codex",model:"sol"});
+  const raw = "ghp_" + "ExampleOnlySecretValue123456789ABCD";
+  const body={request_id:"unique-request-123",text:`@Клоду Проверь мобильную версию и обсуди с @@Соль. API_KEY=${raw}; anna@example.org`};
+  for(let i=0;i<2;i++)expect((await app(post(`${path}/messages`,body,{cookie}))).status).toBe(201);
+  expect(files.size).toBe(1);
+  expect((await agent("next",{session_id:b.id})).task).toBeNull();
+  for(const [index,sess] of [a,b,a].entries()) {
+    const {task}=await agent("next",{session_id:sess.id});
+    expect(task.step).toBe(index);
+    expect((await agent("next",{session_id:sess.id})).task).toBeNull();
+    const completion={session_id:sess.id,task_id:task.id,claim:task.claim,text:`Ответ ${index}; PASSWORD=example-secret-value; anna@example.org`};
+    await agent("complete",completion);
+    await agent("complete",completion);
+  }
+  expect(files.size).toBe(4);
+  for (const value of files.values()) {
+    expect(value).not.toContain(raw);
+    expect(value).not.toContain("example-secret-value");
+    expect(value).not.toContain("anna@example.org");
+  }
+  expect(dispatch.chain("7:unique-request-123", 7)?.prompt).toContain("[SECRET_1]");
+  expect(dispatch.chain("7:unique-request-123", 7)?.prompt).not.toContain(raw);
+  expect((await agent("next",{session_id:a.id})).task).toBeNull();
+  const view=await (await app(get(`${path}/dispatch`,cookie))).json();
+  expect(view.chains[0].status).toBe("done");
+  expect([...files.values()][1]).toContain("author: claude");
+  expect([...files.values()][2]).toContain("author: codex");
+  const unauth=await app(new Request(`${PUBLIC}/api/agent/next`,{method:"POST",body:"{}"}));
+  expect(unauth.status).toBe(401);
 });
