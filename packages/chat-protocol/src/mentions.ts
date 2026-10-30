@@ -53,15 +53,18 @@ export interface AgentSession {
   model: string;
   online: boolean;
   auto_enabled?: boolean;
+  delivery_ready?: boolean;
 }
 export interface DispatchChain {
   id: string;
   message_id: string;
   route: string[];
   step: number;
-  status: "preparing" | "waiting" | "running" | "done" | "cancelled" | "interrupted";
+  status: "preparing" | "waiting" | "running" | "done" | "cancelled" | "interrupted" | "expired" | "needs_owner";
+  expires_at?: number;
 }
 export interface DispatchView {
+  auto_requests?: Array<{author:string;enabled:boolean}>;
   sessions: AgentSession[];
   chains: DispatchChain[];
 }

@@ -12,6 +12,12 @@ export type AutoReplyView = DispatchView & {
     last_error: string | null;
   };
 };
+export function agentDeliveryState(session: AgentSession, view: AutoReplyView): "off" | "waiting_transport" | "waiting" | "working" {
+  if (!session.auto_enabled) return "off";
+  if (view.chains.some(chain => chain.status === "running" && chain.route[chain.step] === session.id)) return "working";
+  const listening = canonicalMention(session.author) === "chatgpt" ? view.chatgpt?.connected : session.delivery_ready;
+  return listening ? "waiting" : "waiting_transport";
+}
 // Личный плагин владельца CHAT.0110. Ссылка открывает Work с готовым запросом,
 // а состояние «на связи» приходит только после настоящей подписки MCP Events.
 const CHATGPT_PLUGIN =
@@ -64,6 +70,10 @@ export async function setAutoReply(
   );
   if (!response.ok) throw new Error("auto-replies");
   return response.json();
+}
+export async function setAuthorAutoReply(chatKey:string,author:string,enabled:boolean):Promise<AutoReplyView>{
+ const response=await fetch(`/api/chats/${chatKey.split("/").map(encodeURIComponent).join("/")}/auto-replies`,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({author:canonicalMention(author),enabled})});
+ if(!response.ok)throw Error("auto-replies");return response.json();
 }
 
 /** Сессия видна до первого ответа: иначе выключенный новый ИИ нельзя запустить. */

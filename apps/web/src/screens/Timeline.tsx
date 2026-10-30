@@ -1,4 +1,5 @@
 import { PrivacyNotice } from "./PrivacyPanel.tsx";
+import {useOnline} from "../lib/pwa.ts";
 import {
   isAgent,
   resolveAuthor,
@@ -504,6 +505,7 @@ function Message({ m, first, published, ctx }: { m: MessageItem; first: boolean;
 }
 
 function LocalMessage({ entry, first, ctx }: { entry: LocalEntry; first: boolean; ctx: EntryCtx }) {
+  const online=useOnline();
   const reply = entry.reply_to ? resolveReply(ctx.known, entry.reply_to) : null;
   const failed = entry.status === "error";
   return (
@@ -518,7 +520,7 @@ function LocalMessage({ entry, first, ctx }: { entry: LocalEntry; first: boolean
           {failed ? (
             <span className="flex flex-wrap items-center gap-x-1.5 text-cap" role="alert">
               <Lamp state="act" size={8} ring={false} />
-              <TextButton onClick={() => ctx.onRetry(entry.localId)} className="min-h-0 text-action-ink underline">
+              <TextButton disabled={!online} onClick={() => ctx.onRetry(entry.localId)} className="min-h-0 text-action-ink underline">
                 {s.timeline.retrySend}
               </TextButton>
               {entry.error ? <span className="text-ink-2">· {entry.error}</span> : null}

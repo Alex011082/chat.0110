@@ -2,12 +2,14 @@ import type { AgentSession } from "@chat0110/chat-protocol";
 import { canonicalMention } from "@chat0110/chat-protocol";
 import { useState } from "react";
 import {
-  autoReplyLaunchUrl,
+  agentDeliveryState,
   setAutoReply,
+  setAuthorAutoReply,
   type AutoReplyView,
 } from "../lib/auto-replies.ts";
-import { Key, KeyLink } from "../ui/kit.tsx";
+import { Key } from "../ui/kit.tsx";
 import { s } from "../strings.ts";
+import {PluginInstallHelp} from "./PluginInstallHelp.tsx";
 
 export function ParticipantAutoReplies({
   author,
@@ -30,16 +32,12 @@ export function ParticipantAutoReplies({
   const [busy, setBusy] = useState("");
   const [error, setError] = useState(false);
   const chatgpt = canonicalMention(author) === "chatgpt";
-  const launchUrl = autoReplyLaunchUrl(repo, chatId, author, en);
+  const requested=view?.auto_requests?.find(row=>row.author===canonicalMention(author))?.enabled??false;
   const toggle = async (session: AgentSession) => {
     if (!canPush || busy) return;
     const enabled = !session.auto_enabled;
     setBusy(session.id);
     setError(false);
-    // Открываем приложение в событии клика: браузер не блокирует вкладку как popup.
-    // Повторные запуски с живой подпиской остаются целиком внутри чата.
-    if (enabled && chatgpt && !view?.chatgpt?.connected)
-      window.open(launchUrl, "_blank", "noopener,noreferrer");
     try {
       onChange(await setAutoReply(`${repo}/${chatId}`, session.id, enabled));
     } catch {
@@ -61,38 +59,38 @@ export function ParticipantAutoReplies({
         <>
           <p className="m-0 text-cap text-ink-2">
             {en
-              ? "The participant is in the history. Connect its session to receive new turns."
-              : "Участник есть в истории. Для новых ходов нужна подключённая сессия."}
+              ? requested?"Waiting for the plugin · start requested":"Install the plugin once to receive new turns."
+              : requested?"Ожидаем плагин · включение запрошено":"Для новых ходов один раз подключи плагин."}
           </p>
-          <KeyLink href={launchUrl} className="self-start text-cap">
-            {en ? "Start automatic replies" : "Запустить автоответы"}
-          </KeyLink>
+          <Key disabled={!!busy} onClick={async()=>{if(busy)return;setBusy("author");setError(false);try{onChange(await setAuthorAutoReply(`${repo}/${chatId}`,author,!requested));}catch{setError(true);}finally{setBusy("");}}} className="self-start text-cap">
+            {busy?(en?"Saving…":"Сохраняем…"):requested?(en?"Turn off automatic replies":"Выключить автоответы"):(en?"Turn on automatic replies":"Включить автоответы")}
+          </Key>
         </>
       ) : (
         sessions.map((session) => {
-          const ready =
-            session.auto_enabled &&
-            (chatgpt ? view.chatgpt?.connected : session.online);
+          const deliveryState = agentDeliveryState(session, view);
           return (
             <div key={session.id} className="flex flex-col gap-2">
-              {sessions.length > 1 ? (
+              {(
                 <span className="text-cap text-ink-2">
                   {session.name} · @{session.alias}
                 </span>
-              ) : null}
+              )}
               <span role="status" className="text-cap text-ink-2">
-                {ready
+                {deliveryState === "working"
+                  ? en ? "Answering" : "Отвечает"
+                  : deliveryState === "waiting"
                   ? en
-                    ? "Automatic replies are on"
-                    : "Автоответы включены"
+                    ? "Listening for addressed turns"
+                    : "Ожидает адресованные сообщения"
                   : session.auto_enabled
                     ? chatgpt
                       ? en
                         ? "Waiting for the ChatGPT subscription"
                         : "Ожидаем подписку ChatGPT"
                       : en
-                        ? "Enabled · waiting for the session"
-                        : "Включены · ждём сессию"
+                        ? "Enabled · waiting for a delivery channel"
+                        : "Включены · ждём канал доставки"
                     : en
                       ? "Automatic replies are off"
                       : "Автоответы выключены"}
@@ -108,28 +106,17 @@ export function ParticipantAutoReplies({
                     : "Сохраняем…"
                   : session.auto_enabled
                     ? en
-                      ? "Stop automatic replies"
-                      : "Остановить автоответы"
+                      ? "Turn off automatic replies"
+                      : "Выключить автоответы"
                     : en
-                      ? "Start automatic replies"
-                      : "Запустить автоответы"}
+                      ? "Turn on automatic replies"
+                      : "Включить автоответы"}
               </Key>
-              {chatgpt && session.auto_enabled && !view.chatgpt?.connected ? (
-                <a
-                  href={launchUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="py-1 text-cap text-ink-2"
-                >
-                  {en
-                    ? "Open ChatGPT to finish starting"
-                    : "Открыть ChatGPT для завершения запуска"}
-                </a>
-              ) : null}
             </div>
           );
         })
       )}
+      <PluginInstallHelp author={author} repo={repo} chatId={chatId}/>
       {error ? (
         <p role="alert" className="m-0 text-cap text-action-ink">
           {en

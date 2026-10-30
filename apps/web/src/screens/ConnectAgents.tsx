@@ -108,6 +108,9 @@ export function ConnectAgents() {
                 : "Выбери приложение, добавь CHAT.0110 и пригласи сессию. Затем отправляй задания через @, а через @@ подключай второго участника."}
             </p>
           </div>
+          <a className="shrink-0 py-2 text-cap text-action-ink" href="/plugins">
+            {en ? "Codex / Claude Code plugins" : "Плагины Codex / Claude Code"}
+          </a>
           <a className="shrink-0 py-2 text-cap text-ink-2" href="/">
             {en ? "Back to chats" : "Вернуться к чатам"}
           </a>

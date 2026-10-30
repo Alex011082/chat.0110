@@ -1,0 +1,12 @@
+{
+  "status": "not-submitted",
+  "version": "0.3.0",
+  "serverMinimum": "2.1.0",
+  "official": false,
+  "reviewPrerequisites": [
+    "publisher identity and account eligibility",
+    "owner-approved public privacy and terms URLs",
+    "clean installation and real client acceptance"
+  ],
+  "automaticDelivery": "requires-active-host-adapter"
+}

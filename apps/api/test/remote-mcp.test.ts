@@ -13,6 +13,24 @@ import { FakeGitHub } from "./fake-github.ts";
 const ROOT = "https://chat.0110.digital",
   repo = "Alex011082/chat.0110",
   chat = "20261023-k7q2";
+
+test("MCP status/control изолированы сессией и reconnect не отменяет owner off",async()=>{
+ const f=await setup();
+ try{
+  f.fake.on("GET",/\/repos\/alex011082\/chat\.0110$/i,{body:{full_name:repo,name:"chat.0110",owner:{login:"Alex011082"},private:false,default_branch:"main",permissions:{push:true}}});
+  f.fake.on("GET",/\/pulls\?state=all&head=/,{body:[{number:1,title:"Chat",body:"<!-- chat0110\nchat_id: 20261023-k7q2\n-->",state:"open",draft:true,head:{ref:`chat/${chat}`,sha:"h",repo:{full_name:repo}},base:{ref:"main"},user:{login:"Alex011082"}}]});
+  const call=async(name:string,args:any)=>{const r=await(await f.remote.handle(f.request("tools/call",{name,arguments:args},f.token))).json();return r.result;};
+  f.dispatch.requestAuto(7,repo,chat,"codex",true);
+  const c=await call("chat0110_connect",{repo,chat_id:chat,author:"codex",alias:"codex-review"});const id=c.structuredContent.session_id;
+  expect(c.structuredContent.auto_enabled).toBe(false);
+  const status=await call("chat0110_status",{session_id:id});expect(status.structuredContent.version).toBe("2.1.0");expect(status.structuredContent.automatic).toBe(false);
+  expect((await call("chat0110_status",{})).isError).toBe(true);
+  const foreign=f.dispatch.register(8,repo,chat,"other","other","Other","codex");expect((await call("chat0110_status",{session_id:foreign.id})).isError).toBe(true);
+  await call("chat0110_set_auto_reply",{session_id:id,enabled:true});f.dispatch.enqueue("review-test",7,repo,chat,"m","q",[id]);
+  await call("chat0110_set_auto_reply",{session_id:id,enabled:false});expect(f.dispatch.chain("review-test",7)?.status).toBe("cancelled");
+  const re=await call("chat0110_connect",{repo,chat_id:chat,author:"codex",alias:"codex-review"});expect(re.structuredContent.auto_enabled).toBe(false);
+ }finally{f.db.close();}
+});
 async function setup() {
   const db = new Database(":memory:");
   const key = await importCookieKey(new Uint8Array(32).fill(7));
@@ -178,6 +196,9 @@ test("удалённый MCP требует OAuth, выдаёт события �
       )
     ).json();
     expect(take.result.structuredContent.claim).toBeString();
+    expect(take.result.structuredContent.final).toBe(true);
+    expect(take.result.structuredContent.step).toBe(0);
+    expect(take.result.structuredContent.expires_at).toBeGreaterThan(Date.now());
     expect(take.result.structuredContent.prompt).not.toContain("old-private-value");
     expect(dispatch.cloudTasks()).toEqual([]);
     const dup = await (
@@ -203,12 +224,22 @@ test("удалённый MCP требует OAuth, выдаёт события �
     expect(stored).not.toContain("private@example.org");
     const written = fake.find("PUT", /\/contents\//)[0]!.body.content;
     expect(Buffer.from(written, "base64").toString()).not.toContain("new-private-value");
+    const peer = dispatch.register(7, repo, chat, "remote:codex", "codex", "Codex", "codex");
+    dispatch.enqueue("late-root", 7, repo, chat, "20261023T100400Z-alex011082-q9w2", "ещё вопрос", [cloud.id, peer.id, cloud.id]);
+    const lateTask = dispatch.cloudTasks()[0]!;
+    const taken = await (await remote.handle(request("tools/call", { name: "chat0110_take", arguments: { task_id: lateTask.id } }, token))).json();
+    dispatch.cancel(7, "late-root");
+    const late = await (await remote.handle(request("tools/call", { name: "chat0110_reply", arguments: { task_id: lateTask.id, claim: taken.result.structuredContent.claim, text: "Поздний итог; password=late-private-value" } }, token))).json();
+    expect(late.result.isError).not.toBe(true);
+    expect(late.result.structuredContent.item.text).not.toContain("late-private-value");
+    expect(dispatch.chain("late-root", 7)?.status).toBe("cancelled");
+    expect(dispatch.remoteReady(7, "codex", peer.id)).toEqual([]);
   } finally {
     db.close();
   }
 });
 
-test("общая подписка не включает чаты; пауза удерживает outbox и запрещает take, resume доставляет один раз", async () => {
+test("общая подписка не включает чаты; Stop отменяет старую очередь, включение ждёт нового запроса", async () => {
   const f = await setup();
   try {
     const a = f.dispatch.ensureCloud(7, repo, chat);
@@ -238,19 +269,24 @@ test("общая подписка не включает чаты; пауза у�
     await Bun.sleep(1000);
     await f.remote.pump();
     await f.remote.pump();
+    expect(f.delivered).toHaveLength(0);
+    expect(f.dispatch.chain("paused",7)?.status).toBe("cancelled");
+    f.dispatch.enqueue("explicit-request",7,repo,chat,"m2","new question",[a.id]);
+    await f.remote.pump();
     expect(f.delivered).toHaveLength(1);
     expect(f.dispatch.session(b.id, 7).auto_enabled).toBe(0);
     expect(f.remote.view(7, repo, chat).sessions.find(s => s.id === a.id)?.online).toBe(true);
     const previousEvent = f.delivered[0].eventId;
     f.dispatch.setAutoEnabled(7, a.id, false);
     f.dispatch.setAutoEnabled(7, a.id, true);
+    f.dispatch.enqueue("next-explicit-request",7,repo,chat,"m3","next question",[a.id]);
     await f.remote.pump();
     expect(f.delivered).toHaveLength(2);
     expect(f.delivered[1].eventId).not.toBe(previousEvent);
     f.dispatch.setAutoEnabled(7, a.id, true);
     await f.remote.pump();
     expect(f.delivered).toHaveLength(2);
-    const claimed = await (await f.remote.handle(f.request("tools/call", { name: "chat0110_take", arguments: { task_id: task.id } }, f.token))).json();
+    const claimed = await (await f.remote.handle(f.request("tools/call", { name: "chat0110_take", arguments: { task_id: f.dispatch.cloudTasks()[0]!.id } }, f.token))).json();
     expect(claimed.result.structuredContent.claim).toBeString();
     f.dispatch.setAutoEnabled(7, a.id, false);
     f.dispatch.setAutoEnabled(7, a.id, true);
@@ -266,7 +302,7 @@ test("общая подписка не включает чаты; пауза у�
     const connected = await (await f.remote.handle(f.request("tools/call", { name: "chat0110_connect", arguments: { repo: repo.toLowerCase(), chat_id: chat, author: "chatgpt" } }, f.token))).json();
     expect(connected).toMatchObject({ result: { structuredContent: { connected: true } } });
     expect(connected.result.structuredContent.session_id).toBe(a.id);
-    expect(f.dispatch.session(a.id, 7).auto_enabled).toBe(1);
+    expect(f.dispatch.session(a.id, 7).auto_enabled).toBe(0);
     expect(f.dispatch.session(b.id, 7).auto_enabled).toBe(0);
   } finally { f.db.close(); }
 });
@@ -342,4 +378,47 @@ test("ожидание конкретной сессии не забирает �
   } finally {
     f.db.close();
   }
+});
+
+test("pending без session_id не раскрывает задания соседних сессий того же аккаунта", async () => {
+  const f = await setup();
+  try {
+    const a = f.dispatch.register(7, repo, chat, "remote:chatgpt:7:codex-a", "codex-a", "Codex A", "codex", "");
+    const b = f.dispatch.register(7, repo, chat, "remote:chatgpt:7:codex-b", "codex-b", "Codex B", "codex", "");
+    f.dispatch.enqueue("scope-a", 7, repo, chat, "20261023T100300Z-alex011082-q9w1", "вопрос A", [a.id]);
+    f.dispatch.enqueue("scope-b", 7, repo, chat, "20261023T100400Z-alex011082-q9w2", "вопрос B", [b.id]);
+    for (const session_id of [undefined, null, "", "  ", 42]) {
+      const response = await f.remote.handle(f.request("tools/call", { name: "chat0110_pending", arguments: { author: "codex", session_id } }, f.token));
+      const body = await response.json();
+      expect(body.result.isError).toBe(true);
+      expect(JSON.stringify(body)).not.toContain("scope-a");
+      expect(JSON.stringify(body)).not.toContain("scope-b");
+    }
+    // Невалидный запрос не захватывает очередь и не мешает точной сессии продолжить работу.
+    const scoped = await (await f.remote.handle(f.request("tools/call", { name: "chat0110_pending", arguments: { author: "codex", session_id: a.id } }, f.token))).json();
+    expect(scoped.result.structuredContent.turns).toHaveLength(1);
+    expect(f.dispatch.ownedTask(scoped.result.structuredContent.turns[0].id, 7).session_id).toBe(a.id);
+    const foreign = f.dispatch.register(8, repo, chat, "remote:chatgpt:8:codex", "codex", "Codex", "codex", "");
+    f.dispatch.enqueue("foreign-scope", 8, repo, chat, "20261023T100500Z-alex011082-q9w3", "чужой вопрос", [foreign.id]);
+    const otherAccount = await (await f.remote.handle(f.request("tools/call", { name: "chat0110_pending", arguments: { author: "codex", session_id: foreign.id } }, f.token))).json();
+    expect(otherAccount.result.structuredContent.turns).toEqual([]);
+    const listed = await (await f.remote.handle(f.request("tools/list"))).json();
+    expect(listed.result.tools.find((tool: any) => tool.name === "chat0110_pending").inputSchema.required).toContain("session_id");
+  } finally { f.db.close(); }
+});
+
+test("remote pending показывает ожидание только до отключения действительного клиента", async () => {
+  const f = await setup();
+  try {
+    const s = f.dispatch.register(7, repo, chat, "remote:codex", "codex", "Codex", "codex");
+    const controller = new AbortController();
+    const req = new Request(f.request("tools/call", { name: "chat0110_pending", arguments: { author: "codex", session_id: s.id, wait: true } }, f.token), { signal: controller.signal });
+    const response = f.remote.handle(req);
+    for (let i = 0; i < 30 && !f.dispatch.list(7, repo, chat).sessions[0]?.delivery_ready; i++) await Bun.sleep(5);
+    expect(f.dispatch.list(7, repo, chat).sessions[0]?.delivery_ready).toBe(true);
+    controller.abort();
+    expect(f.dispatch.list(7, repo, chat).sessions[0]?.delivery_ready).toBe(false);
+    await response;
+    expect(f.dispatch.list(7, repo, chat).sessions[0]?.delivery_ready).toBe(false);
+  } finally { f.db.close(); }
 });

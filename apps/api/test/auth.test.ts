@@ -113,3 +113,12 @@ describe("вход через GitHub", () => {
     expect(setCookies(res)[0]).toContain("Max-Age=0");
   });
 });
+
+test("OAuth возвращает в чат/дерево и отклоняет внешний или служебный next",async()=>{
+ for(const [next,want] of [["/Alex011082/Y-TNG/20261030-pp11","/Alex011082/Y-TNG/20261030-pp11"],["/Alex011082/Y-TNG/~tree?chat=20261030-pp11","/Alex011082/Y-TNG/~tree?chat=20261030-pp11"],["//evil.example/","/"],["/\\evil.example/x","/"],["/api/chats","/"],["/auth/logout","/"],["/A/B/invalid","/"],["/A/B/20261030-pp11%0d%0aX:1","/"]]){
+  const {auth}=await setup();const start=auth.login(new Request(`${PUBLIC}/auth/login?next=${encodeURIComponent(next!)}`));
+  const state=new URL(start.headers.get("location")!).searchParams.get("state");const cookie=start.headers.getSetCookie().map(x=>x.split(";")[0]).join("; ");
+  const response=await auth.callback(new Request(`${PUBLIC}/auth/callback?code=fixture&state=${state}`,{headers:{cookie}}));
+  expect(response.headers.get("location")).toBe(want!);
+ }
+});

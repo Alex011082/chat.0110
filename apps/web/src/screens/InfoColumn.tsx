@@ -1,7 +1,7 @@
 import type { ChatDetail, Decision, ForkRef, InheritedContext, TimelineItem } from "@chat0110/chat-protocol";
 import { useEffect, useMemo, useState } from "react";
 import { dispatchRequest } from "../dispatch.ts";
-import { mergeAgentParticipants, sessionsForAuthor, type AutoReplyView } from "../lib/auto-replies.ts";
+import { agentDeliveryState, mergeAgentParticipants, sessionsForAuthor, type AutoReplyView } from "../lib/auto-replies.ts";
 import { ParticipantAutoReplies } from "./ParticipantAutoReplies.tsx";
 import { useCopy } from "../hooks.ts";
 import { agentLinkPhrase } from "../lib/chat.ts";
@@ -87,7 +87,7 @@ export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, de
                 : s.info.humanWrote(when);
             return (
               <li key={p.author} className="flex items-start gap-3">
-                <Lamp state={p.is_agent ? sessionsForAuthor(autoReplies?.sessions ?? [], p.author).some((session) => session.auto_enabled && session.online) ? "live" : "off" : isFresh(p.last_at, now) ? "live" : "off"} className="mt-1.5 shrink-0" />
+                <Lamp state={p.is_agent ? sessionsForAuthor(autoReplies?.sessions ?? [], p.author).some((session) => autoReplies && ["waiting", "working"].includes(agentDeliveryState(session, autoReplies))) ? "live" : "off" : isFresh(p.last_at, now) ? "live" : "off"} className="mt-1.5 shrink-0" />
                 <span className="flex min-w-0 flex-col gap-0.5">
                   <span className="text-copy leading-snug font-semibold [overflow-wrap:anywhere]">{p.display}</span>
                   <span className="text-cap text-ink-2">{role}</span>

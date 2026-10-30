@@ -39,6 +39,18 @@ export function createStatic(distDir: string) {
       return new Response("Метод не поддерживается", { status: 405, headers: { Allow: "GET, HEAD" } });
     }
     const pathname = new URL(req.url).pathname;
+    if(pathname.startsWith("/downloads/")){
+      if(!/^\/downloads\/(?:plugins\.json|chat0110-(?:codex|claude-code)-[0-9]+\.[0-9]+\.[0-9]+\.zip(?:\.sha256)?)$/.test(pathname))return new Response("Не найдено",{status:404});
+      const file=await fileIfExists(inside(pathname.slice(1)));if(!file)return new Response("Не найдено",{status:404});
+      const manifest=pathname.endsWith(".json"),zip=pathname.endsWith(".zip");
+      return new Response(file,{headers:{"Content-Type":manifest?"application/json":zip?"application/zip":"text/plain; charset=utf-8","Cache-Control":manifest?"no-cache":IMMUTABLE,"X-Content-Type-Options":"nosniff",...(!manifest?{"Content-Disposition":`attachment; filename="${pathname.split("/").at(-1)}"`}:{})}});
+    }
+    if (["/sw.js", "/manifest.webmanifest", "/offline.html"].includes(pathname)) {
+      const file=await fileIfExists(inside(pathname.slice(1)));
+      if (!file) return new Response("Не найдено",{status:404});
+      const headers=pathname==="/offline.html" ? htmlHeaders({"Cache-Control":"no-store"}) : new Headers({"Cache-Control":"no-cache","X-Content-Type-Options":"nosniff","Content-Type":pathname==="/sw.js"?"text/javascript; charset=utf-8":"application/manifest+json"});
+      return new Response(file,{headers});
+    }
 
     if (pathname.startsWith("/assets/")) {
       const f = await fileIfExists(inside(pathname.slice(1)));

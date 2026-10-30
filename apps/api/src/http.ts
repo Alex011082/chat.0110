@@ -264,17 +264,20 @@ export async function createApp(deps: AppDeps): Promise<App> {
         }
         if (rest.length === 1 && rest[0] === "auto-replies" && method === "POST") {
           const body = await readJson(req);
-          if (typeof body.session_id !== "string" || !body.session_id || typeof body.enabled !== "boolean")
-            throw badRequest("Нужны session_id и enabled");
-          const agent = dispatch.session(body.session_id, session.uid);
-          if (agent.repo !== `${repo.owner}/${repo.name}`.toLowerCase() || agent.chat !== chatId)
-            throw notFound("Сессия не найдена");
+          const bySession=typeof body.session_id==="string"&&!!body.session_id;
+          const byAuthor=typeof body.author==="string"&&!!body.author;
+          if (bySession===byAuthor || typeof body.enabled !== "boolean")
+            throw badRequest("Нужны ровно один session_id/author и enabled");
           const info = await gh.getRepo(repo);
           if (!info.can_push) throw forbidden("Нет права записи");
           const pull = await gh.findChatPull(repo, chatId);
           if (!pull) throw notFound("Чат не найден");
           if (pull.state !== "open") throw forbidden("Чат закрыт");
-          dispatch.setAutoEnabled(session.uid, agent.id, body.enabled);
+          if(bySession){
+            const agent=dispatch.session(body.session_id as string,session.uid);
+            if(agent.repo!==info.full_name.toLowerCase()||agent.chat!==chatId)throw notFound("Сессия не найдена");
+            dispatch.setAutoEnabled(session.uid,agent.id,body.enabled);
+          }else dispatch.requestAuto(session.uid,info.full_name,chatId,body.author as string,body.enabled);
           if (body.enabled && deps.background) void remote.pump();
           return json(200, remote.view(session.uid, info.full_name, chatId));
         }
@@ -422,7 +425,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
       const info = await requireOpenChat(gh, repo, body.chat_id);
       return json(
         200,
-        dispatch.register(
+        {version:"2.1.0",...dispatch.register(
           user.id,
           info.full_name,
           body.chat_id,
@@ -431,7 +434,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
           String(body.name ?? ""),
           String(body.author ?? ""),
           String(body.model ?? ""),
-        ),
+        )},
       );
     }
     const session = dispatch.session(String(body.session_id), user.id);
@@ -439,16 +442,28 @@ export async function createApp(deps: AppDeps): Promise<App> {
     const info = await gh.getRepo(repo);
     if (!info.can_push) throw forbidden("Нет права записи");
     dispatch.touch(session.id);
+    if(path==="/api/agent/status"||path==="/api/agent/auto-replies"){
+      await requireOpenChat(gh,repo,session.chat);
+      if(path.endsWith("auto-replies")){
+        if(typeof body.enabled!=="boolean")throw badRequest("Нужен enabled boolean");
+        dispatch.setAutoEnabled(user.id,session.id,body.enabled);
+      }
+      return json(200,{version:"2.1.0",session:dispatch.list(user.id,session.repo,session.chat).sessions.find(s=>s.id===session.id),requires_live_client:true});
+    }
     if (path === "/api/agent/next") {
       const pull = await gh.findChatPull(repo, session.chat);
       if (!pull || pull.state !== "open") throw new HttpError(409, "conflict", "Чат закрыт");
       const until = Date.now() + (body.wait === true ? 25_000 : 0);
       let task;
-      do {
-        task = dispatch.claim(session.id);
-        if (task || Date.now() >= until || req.signal.aborted) break;
-        await Bun.sleep(500);
-      } while (true);
+      const stopWaiting = body.wait === true ? dispatch.waiting(session.id, user.id) : () => {};
+      req.signal.addEventListener("abort", stopWaiting, { once: true });
+      try {
+        do {
+          task = dispatch.claim(session.id);
+          if (task || Date.now() >= until || req.signal.aborted) break;
+          await Bun.sleep(500);
+        } while (true);
+      } finally { stopWaiting(); req.signal.removeEventListener("abort", stopWaiting); }
       if (!task) return json(200, { task: null });
       const chain = dispatch.chain(task.chain_id, user.id)!;
       return json(200, {
@@ -458,9 +473,10 @@ export async function createApp(deps: AppDeps): Promise<App> {
         chat_id: session.chat,
         url: `${config.publicUrl}/${session.repo}/${session.chat}`,
         final: task.step === JSON.parse(chain.route).length - 1,
+        expires_at: chain.expires_at,
       });
     }
-    const task = dispatch.task(String(body.task_id), session.id, String(body.claim));
+    const task = dispatch.task(String(body.task_id), session.id, String(body.claim), path === "/api/agent/complete");
     if (path === "/api/agent/heartbeat") {
       dispatch.heartbeat(task.id, session.id, String(body.claim));
       return json(200, { ok: true });
@@ -471,7 +487,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
         throw badRequest("Нужен ответ до 60000 знаков");
       // Одинаковый id и сохранённый текст делают повтор после обрыва безопасным.
       body.text = (await privacy.scan(body.text.replace(/\r\n?/g, "\n").trim())).text;
-      dispatch.prepareAnswer(task.id, session.id, String(body.claim), body.text as string);
+      dispatch.prepareAnswer(task.id, session.id, String(body.claim), body.text as string, body.outcome === undefined ? "continue" : String(body.outcome));
       const pull = await gh.findChatPull(repo, session.chat);
       if (!pull || pull.state !== "open") throw new HttpError(409, "conflict", "Чат закрыт");
       const item = await postMessage(

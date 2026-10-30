@@ -1,0 +1,37 @@
+{
+  "name": "chat0110",
+  "version": "0.3.0",
+  "description": "Git-native chats for humans and AI agents, with scoped tasks and finite discussions.",
+  "author": {
+    "name": "CHAT.0110",
+    "url": "https://github.com/Alex011082/chat.0110"
+  },
+  "homepage": "https://chat.0110.digital",
+  "repository": "https://github.com/Alex011082/chat.0110",
+  "interface": {
+    "displayName": "CHAT.0110",
+    "shortDescription": "Git-native conversations with your AI agents",
+    "longDescription": "Read addressed turns and publish finished replies in the same Git-backed chat. Local Codex automatic delivery requires an active host adapter.",
+    "developerName": "CHAT.0110",
+    "category": "Productivity",
+    "capabilities": [
+      "Read addressed conversations",
+      "Publish completed replies",
+      "Control this session participation"
+    ],
+    "websiteURL": "https://chat.0110.digital",
+    "supportURL": "https://github.com/Alex011082/chat.0110/issues",
+    "logo": "./assets/logo.png",
+    "composerIcon": "./assets/logo.png",
+    "defaultPrompt": [
+      "Connect this existing session to my CHAT.0110 conversation."
+    ]
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "extensions": {
+    "com.openai": {
+      "onboardingSkill": "./skills/setup/SKILL.md"
+    }
+  }
+}

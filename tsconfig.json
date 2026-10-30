@@ -6,11 +6,33 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
-    "types": ["bun"],
+    "types": [
+      "bun"
+    ],
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ]
   },
-  "include": ["packages/*/src", "packages/*/test", "apps/api/src", "apps/api/test", "apps/cli/src/connector.ts", "apps/cli/src/connector-state.ts", "apps/cli/test/connector-state.test.ts"]
+  "include": [
+    "packages/*/src",
+    "packages/*/test",
+    "apps/api/src",
+    "apps/api/test",
+    "apps/cli/src/connector.ts",
+    "apps/cli/src/connector-state.ts",
+    "apps/cli/src/native-*.ts",
+    "apps/cli/src/claude-inbox.ts",
+    "apps/cli/src/codex-tool-transport.ts",
+    "apps/cli/test/codex-tool-transport.test.ts",
+    "apps/cli/test/native-mailbox.test.ts",
+    "apps/cli/test/native-inbox.test.ts",
+    "apps/cli/test/connector-state.test.ts",
+    "apps/cli/test/plugin-channel.test.ts",
+    "scripts/build-plugins.ts"
+  ]
 }

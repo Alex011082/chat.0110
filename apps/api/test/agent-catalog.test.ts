@@ -57,3 +57,28 @@ test("новый ИИ виден до первого ответа и не дуб
   const existing = { author:"chatgpt", display:"ChatGPT", is_agent:true, last_at:"2026-10-27T00:00:00Z", count:1 };
   expect(mergeAgentParticipants([existing], [session])).toEqual([existing]);
 });
+
+test("копируемый JSON ожидания явно содержит session_id для всех обычных клиентов на RU/EN", () => {
+  for (const en of [false, true]) {
+    for (const card of agentCards(en).filter(card => !["chatgpt", "other-ai"].includes(card.id))) {
+      for (const context of [null, { repo: "Alex011082/Y-TNG", chat_id: "20261030-pp11" }]) {
+        const task = participationTask(card, en, context);
+        const example = task.match(/chat0110_pending (\{[^}]+\})/);
+        expect(example).not.toBeNull();
+        expect(JSON.parse(example![1]!).session_id).toBe("<session_id>");
+      }
+    }
+  }
+});
+
+test("готовность отделена от регистрации: transport wait, активный ход и остановка", async () => {
+  const { agentDeliveryState } = await import("../../web/src/lib/auto-replies.ts");
+  const session = { id:"native", alias:"codex", author:"codex", name:"Codex", model:"", online:true, auto_enabled:true };
+  const view = { sessions:[session], chains:[] };
+  expect(agentDeliveryState(session, view)).toBe("waiting_transport");
+  expect(agentDeliveryState({...session, delivery_ready:true}, view)).toBe("waiting");
+  const active = {...view, chains:[{id:"t", message_id:"m", route:[session.id], step:0, status:"running" as const}]};
+  expect(agentDeliveryState(session, active)).toBe("working");
+  expect(agentDeliveryState({...session, auto_enabled:false}, active)).toBe("off");
+  expect(agentDeliveryState(session, {...active, chains:[{...active.chains[0]!, status:"expired"}]})).toBe("waiting_transport");
+});

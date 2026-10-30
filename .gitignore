@@ -7,3 +7,7 @@ dist/
 coverage/
 
 .data/
+/plugins/*/REVIEW.md
+/plugins/claude-code/server/connector.js
+/plugins/claude-code/THIRD_PARTY_NOTICES.txt
+/apps/web/public/downloads/
