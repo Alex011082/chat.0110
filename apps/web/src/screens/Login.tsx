@@ -40,7 +40,7 @@ export function Login({
             </div>
           </div>
         ) : null}
-        <ActionKeyLink href="/auth/login" className="min-h-12 px-[22px] text-copy">
+        <ActionKeyLink href={`/auth/login?next=${encodeURIComponent(location.pathname+location.search+location.hash)}`} className="min-h-12 px-[22px] text-copy">
           {s.login.signIn}
         </ActionKeyLink>
         <Screen as="div" className="px-4 py-3.5">

@@ -21,6 +21,7 @@ import { NewChatDialog } from "./NewChatDialog.tsx";
 import { ProposeDialog, type ProposeTarget } from "./ProposeDialog.tsx";
 import { Rail } from "./Rail.tsx";
 import { TreeView } from "./TreeView.tsx";
+import {drafts} from "../lib/drafts.ts";
 
 const LAST_REPO = "chat0110.lastRepo";
 const POLL_MS = 60_000;
@@ -67,6 +68,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
   const [chatsError, setChatsError] = useState<string | null>(null);
   const [tl, setTl] = useState<TimelineState>(NO_TIMELINE);
   const [outbox, setOutbox] = useState<Record<string, LocalEntry[]>>({});
+  useEffect(()=>{drafts.pending=Object.values(outbox).some(entries=>entries.some(e=>e.status!=="published"));return()=>{drafts.pending=false;};},[outbox]);
   const [newOpen, setNewOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [reply, setReply] = useState<MessageItem | null>(null);
@@ -86,6 +88,8 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
   }, [route.owner, route.repo, repos]);
   const repoInfo = repos?.find((r) => r.full_name === repoFull) ?? null;
   const chatKey = repoFull && route.chatId ? `${repoFull.toLowerCase()}/${route.chatId}` : null;
+  const previousChat=useRef(chatKey);
+  useEffect(()=>{if(previousChat.current&&previousChat.current!==chatKey){const old=drafts.get(previousChat.current);drafts.set(previousChat.current,old.text);}previousChat.current=chatKey;},[chatKey]);
 
   const loadRepos = useCallback(async () => {
     setReposError(null);
@@ -260,7 +264,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
   );
 
   const send = async (text: string, replyTo?: string): Promise<boolean> => {
-    if (!repoFull || !route.chatId || !chatKey) return false;
+    if (!repoFull || !route.chatId || !chatKey || !navigator.onLine) return false;
     try { text = (await checkPrivacy(chatKey, text)).text; }
     catch (error) { setToast(error instanceof Error ? error.message : s.errors.generic); return false; }
     const entry: LocalEntry = {
@@ -270,12 +274,14 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       status: "sending",
       ...(replyTo ? { reply_to: replyTo } : {}),
     };
+    drafts.pending=true;
     setOutbox((box) => ({ ...box, [chatKey]: [...(box[chatKey] ?? []), entry] }));
     void post(chatKey, repoFull, route.chatId, entry);
     return true;
   };
 
   const retry = (localId: string) => {
+    if (!navigator.onLine) {setToast(s.errors.network);return;}
     if (!repoFull || !route.chatId || !chatKey) return;
     const entry = outbox[chatKey]?.find((e) => e.localId === localId);
     if (!entry) return;
@@ -308,6 +314,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
     openChat(c);
   };
   const onReply = (m: MessageItem) => {
+    if(chatKey)drafts.set(chatKey,drafts.get(chatKey).text,m.id);
     setReply(m);
     setFocusTick((t) => t + 1);
   };
@@ -491,7 +498,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
         reply={reply}
         focusTick={focusTick}
         onReply={onReply}
-        onClearReply={() => setReply(null)}
+        onClearReply={() => {if(chatKey)drafts.set(chatKey,drafts.get(chatKey).text);setReply(null);}}
         onSend={send}
         onRetry={retry}
         onAccept={accept}

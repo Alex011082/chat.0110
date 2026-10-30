@@ -6,6 +6,7 @@ import { s, getLocale, subscribeLocale, setLocale } from "./strings.ts";
 import { Mark } from "./ui/kit.tsx";
 import { Login } from "./screens/Login.tsx";
 import { Shell } from "./screens/Shell.tsx";
+import {drafts} from "./lib/drafts.ts";
 
 type Auth = { state: "loading" } | { state: "anon"; notice?: "forbidden" | "offline" } | { state: "in"; me: Me };
 
@@ -25,7 +26,7 @@ export function App() {
     api()
       .me()
       .then(
-        (me) => setAuth({ state: "in", me }),
+        (me) => {drafts.activate(me.id);setAuth({ state: "in", me });},
         (e: unknown) => {
           // 403 на /api/me — вход закрыт списком беты: объясняем, а не крутим вход по кругу.
           if (e instanceof ApiFailure && e.status === 403) {
@@ -41,6 +42,7 @@ export function App() {
   }, []);
 
   const logout = async () => {
+    drafts.clear();
     try {
       await api().logout();
     } catch {

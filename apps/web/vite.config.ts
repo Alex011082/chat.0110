@@ -1,6 +1,7 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type ProxyOptions } from "vite";
+import {pwaPlugin} from "./pwa-plugin.ts";
 
 // В разработке API живёт на :4340 (apps/api), а Vite — на своём порту.
 const API = "http://localhost:4340";
@@ -31,7 +32,7 @@ const toApi: ProxyOptions = {
 };
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), pwaPlugin()],
   server: {
     proxy: {
       "^/api/": toApi,

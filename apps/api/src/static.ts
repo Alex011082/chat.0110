@@ -39,6 +39,12 @@ export function createStatic(distDir: string) {
       return new Response("Метод не поддерживается", { status: 405, headers: { Allow: "GET, HEAD" } });
     }
     const pathname = new URL(req.url).pathname;
+    if (["/sw.js", "/manifest.webmanifest", "/offline.html"].includes(pathname)) {
+      const file=await fileIfExists(inside(pathname.slice(1)));
+      if (!file) return new Response("Не найдено",{status:404});
+      const headers=pathname==="/offline.html" ? htmlHeaders({"Cache-Control":"no-store"}) : new Headers({"Cache-Control":"no-cache","X-Content-Type-Options":"nosniff","Content-Type":pathname==="/sw.js"?"text/javascript; charset=utf-8":"application/manifest+json"});
+      return new Response(file,{headers});
+    }
 
     if (pathname.startsWith("/assets/")) {
       const f = await fileIfExists(inside(pathname.slice(1)));

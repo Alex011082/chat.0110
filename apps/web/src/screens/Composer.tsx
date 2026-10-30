@@ -6,9 +6,10 @@ import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type Keyb
 import { excerpt } from "../lib/text.ts";
 import { s } from "../strings.ts";
 import { ActionKey, ActionRound, Body, cx, SLOT } from "../ui/kit.tsx";
+import {drafts} from "../lib/drafts.ts";
+import {useOnline} from "../lib/pwa.ts";
 
 // Черновики живут, пока открыта вкладка: переход в другой чат их не теряет.
-const drafts = new Map<string, string>();
 
 interface ComposerProps {
   chatKey: string;
@@ -24,7 +25,9 @@ interface ComposerProps {
 
 export function Composer(p: ComposerProps) {
   const [sending, setSending] = useState(false);
-  const [text, setText] = useState(() => drafts.get(p.chatKey) ?? "");
+  const [text, setText] = useState(() => drafts.get(p.chatKey).text);
+  const online=useOnline();
+  useEffect(()=>{drafts.set(p.chatKey,text,p.reply?.id);},[p.reply?.id,p.chatKey,text]);
   const area = useRef<HTMLTextAreaElement>(null);
   const [dispatch, setDispatch] = useState<DispatchView | null>(null);
   const [dispatchError, setDispatchError] = useState(false);
@@ -197,13 +200,12 @@ export function Composer(p: ComposerProps) {
 
   const update = (value: string) => {
     setText(value);
-    if (value) drafts.set(p.chatKey, value);
-    else drafts.delete(p.chatKey);
+    drafts.set(p.chatKey,value,p.reply?.id);
   };
 
   const submit = async () => {
     const value = text.trim();
-    if (!value || !p.canPush || routingError || sending) return;
+    if (!value || !p.canPush || !online || routingError || sending) return;
     setSending(true);
     try {
       const sent = await p.onSend(value, p.reply?.id);
@@ -280,7 +282,7 @@ export function Composer(p: ComposerProps) {
         {!p.canPush ? <p className="m-0 px-1 text-cap text-ink-2">{s.composer.readOnly}</p> : null}
         <div className="flex items-end gap-2.5">
           {field}
-          <ActionRound type="submit" aria-label={s.composer.send} disabled={!p.canPush || !!routingError || sending} />
+          <ActionRound type="submit" aria-label={s.composer.send} disabled={!p.canPush || !online || !!routingError || sending} />
         </div>
       </form>
     );
@@ -299,7 +301,7 @@ export function Composer(p: ComposerProps) {
       <PrivacyPanel chatKey={p.chatKey} text={text} onApply={update} />
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <span className="px-1 text-cap text-ink-2">{p.canPush ? s.composer.hint(p.branch) : s.composer.readOnly}</span>
-        <ActionKey type="submit" disabled={!p.canPush || !!routingError || sending}>
+        <ActionKey type="submit" disabled={!p.canPush || !online || !!routingError || sending}>
           {sending ? (s.locale === "en" ? "Checking…" : "Проверяем…") : s.composer.send}
         </ActionKey>
       </div>

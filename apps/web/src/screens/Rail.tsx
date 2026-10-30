@@ -27,14 +27,16 @@ export function Rail({ view, onChats, onTree, onNew, onLogout, canCreate, bottom
     return (
       <nav
         aria-label={s.rail.label}
-        className="flex shrink-0 items-start justify-around gap-2 border-t border-line bg-rail px-3 pt-3 pb-[max(14px,env(safe-area-inset-bottom))]"
+        className="flex shrink-0 flex-col gap-3 border-t border-line bg-rail px-3 pt-3 pb-[max(14px,env(safe-area-inset-bottom))]"
       >
-        {knobs}
+        <div className="flex w-full justify-around gap-2">{knobs}</div>
+        <div className="flex w-full items-center justify-between gap-2">
         <LanguageSwitch />
         <a href="/connect" className="text-cap text-ink-2">{s.locale === "en" ? "Connect AI" : "Подключить ИИ"}</a>
         <TextButton onClick={onLogout} className="mt-[9px] min-h-10 px-2.5">
           {s.rail.logout}
         </TextButton>
+        </div>
       </nav>
     );
   }
