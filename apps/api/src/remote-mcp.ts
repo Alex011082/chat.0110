@@ -51,8 +51,8 @@ export const REMOTE_TOOLS = [
   {
     name: "chat0110_pending",
     description:
-      "List addressed turns ready for the connected agent. No model API calls. wait=true holds the request up to 25 seconds. Empty results do not mean a permanent subscription.",
-    inputSchema: schema({ author: str, session_id: str, wait: { type: "boolean" } }),
+      "List addressed turns for the exact session_id returned by chat0110_connect. session_id is required; refresh the client tool catalog if missing. No model API calls. wait=true holds up to 25 seconds; it is not a permanent subscription.",
+    inputSchema: schema({ author: str, session_id: str, wait: { type: "boolean" } }, ["session_id"]),
     annotations: annotations(true),
     ...policy,
   },
@@ -199,11 +199,14 @@ export function createRemoteMcp(o: Options) {
       };
     }
     if (name === "chat0110_pending") {
+      // Старый каталог клиента не должен расширять ожидание до всех сессий аккаунта.
+      if (typeof args.session_id !== "string" || !args.session_id.trim())
+        throw badRequest("Передай session_id из chat0110_connect; если параметра нет, обнови каталог инструментов MCP");
       const author = canonicalMention(String(args.author ?? "chatgpt"));
       const until = Date.now() + (args.wait === true ? 25_000 : 0);
       let ready;
       do {
-        ready = dispatch.remoteReady(uid, author, typeof args.session_id === "string" ? args.session_id : null);
+        ready = dispatch.remoteReady(uid, author, args.session_id);
         if (ready.length || Date.now() >= until) break;
         await Bun.sleep(500);
       } while (true);

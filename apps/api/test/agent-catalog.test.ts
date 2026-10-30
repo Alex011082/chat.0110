@@ -57,3 +57,16 @@ test("новый ИИ виден до первого ответа и не дуб
   const existing = { author:"chatgpt", display:"ChatGPT", is_agent:true, last_at:"2026-10-27T00:00:00Z", count:1 };
   expect(mergeAgentParticipants([existing], [session])).toEqual([existing]);
 });
+
+test("копируемый JSON ожидания явно содержит session_id для всех обычных клиентов на RU/EN", () => {
+  for (const en of [false, true]) {
+    for (const card of agentCards(en).filter(card => !["chatgpt", "other-ai"].includes(card.id))) {
+      for (const context of [null, { repo: "Alex011082/Y-TNG", chat_id: "20261030-pp11" }]) {
+        const task = participationTask(card, en, context);
+        const example = task.match(/chat0110_pending (\{[^}]+\})/);
+        expect(example).not.toBeNull();
+        expect(JSON.parse(example![1]!).session_id).toBe("<session_id>");
+      }
+    }
+  }
+});

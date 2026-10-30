@@ -343,3 +343,30 @@ test("ожидание конкретной сессии не забирает �
     f.db.close();
   }
 });
+
+test("pending без session_id не раскрывает задания соседних сессий того же аккаунта", async () => {
+  const f = await setup();
+  try {
+    const a = f.dispatch.register(7, repo, chat, "remote:chatgpt:7:codex-a", "codex-a", "Codex A", "codex", "");
+    const b = f.dispatch.register(7, repo, chat, "remote:chatgpt:7:codex-b", "codex-b", "Codex B", "codex", "");
+    f.dispatch.enqueue("scope-a", 7, repo, chat, "20261023T100300Z-alex011082-q9w1", "вопрос A", [a.id]);
+    f.dispatch.enqueue("scope-b", 7, repo, chat, "20261023T100400Z-alex011082-q9w2", "вопрос B", [b.id]);
+    for (const session_id of [undefined, null, "", "  ", 42]) {
+      const response = await f.remote.handle(f.request("tools/call", { name: "chat0110_pending", arguments: { author: "codex", session_id } }, f.token));
+      const body = await response.json();
+      expect(body.result.isError).toBe(true);
+      expect(JSON.stringify(body)).not.toContain("scope-a");
+      expect(JSON.stringify(body)).not.toContain("scope-b");
+    }
+    // Невалидный запрос не захватывает очередь и не мешает точной сессии продолжить работу.
+    const scoped = await (await f.remote.handle(f.request("tools/call", { name: "chat0110_pending", arguments: { author: "codex", session_id: a.id } }, f.token))).json();
+    expect(scoped.result.structuredContent.turns).toHaveLength(1);
+    expect(f.dispatch.ownedTask(scoped.result.structuredContent.turns[0].id, 7).session_id).toBe(a.id);
+    const foreign = f.dispatch.register(8, repo, chat, "remote:chatgpt:8:codex", "codex", "Codex", "codex", "");
+    f.dispatch.enqueue("foreign-scope", 8, repo, chat, "20261023T100500Z-alex011082-q9w3", "чужой вопрос", [foreign.id]);
+    const otherAccount = await (await f.remote.handle(f.request("tools/call", { name: "chat0110_pending", arguments: { author: "codex", session_id: foreign.id } }, f.token))).json();
+    expect(otherAccount.result.structuredContent.turns).toEqual([]);
+    const listed = await (await f.remote.handle(f.request("tools/list"))).json();
+    expect(listed.result.tools.find((tool: any) => tool.name === "chat0110_pending").inputSchema.required).toContain("session_id");
+  } finally { f.db.close(); }
+});
