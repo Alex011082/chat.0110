@@ -126,6 +126,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
         `${base.origin}/${String(args.repo).toLowerCase()}/${args.chat_id}/${String(args.alias).toLowerCase()}`,
       );
       const registered = await call("register", args);
+      // Старый API не гарантирует новые границы очереди и управление из чата.
+      const version=typeof registered.version==="string"?registered.version.match(/^2\.(\d+)\.\d+$/):null;
+      if(!version||Number(version[1])<1)throw Error("Для этого плагина нужен CHAT.0110 MCP/API 2.1 или новее в ветке 2.x. Доставка не запущена.");
       session = registered.id;
       current = state.value.session === session ? state.value.current : null;
       save();

@@ -449,6 +449,7 @@ test("адресное сообщение проходит Claude → Codex → 
     return result;
   };
   const a=await agent("register",{repo:"Alex011082/chat.0110",chat_id:chat,session_id:"claude-instance",alias:"claude-work",name:"Claude",author:"claude",model:"sonnet"});
+  expect(a.version).toBe("2.1.0");
   const b=await agent("register",{repo:"Alex011082/chat.0110",chat_id:chat,session_id:"codex-instance",alias:"codex-work",name:"Codex",author:"codex",model:"sol"});
   const raw = "ghp_" + "ExampleOnlySecretValue123456789ABCD";
   const body={request_id:"unique-request-123",text:`@Клоду Проверь мобильную версию и обсуди с @@Соль. API_KEY=${raw}; anna@example.org`};

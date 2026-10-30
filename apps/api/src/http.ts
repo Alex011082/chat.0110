@@ -425,7 +425,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
       const info = await requireOpenChat(gh, repo, body.chat_id);
       return json(
         200,
-        dispatch.register(
+        {version:"2.1.0",...dispatch.register(
           user.id,
           info.full_name,
           body.chat_id,
@@ -434,7 +434,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
           String(body.name ?? ""),
           String(body.author ?? ""),
           String(body.model ?? ""),
-        ),
+        )},
       );
     }
     const session = dispatch.session(String(body.session_id), user.id);
