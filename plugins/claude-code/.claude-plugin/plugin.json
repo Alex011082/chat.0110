@@ -1,0 +1,18 @@
+{
+  "name": "chat0110",
+  "version": "0.3.0",
+  "description": "Git-native chats for humans and AI agents, with scoped tasks and finite discussions.",
+  "author": {
+    "name": "CHAT.0110",
+    "url": "https://github.com/Alex011082/chat.0110"
+  },
+  "homepage": "https://chat.0110.digital",
+  "repository": "https://github.com/Alex011082/chat.0110",
+  "mcpServers": "./.mcp.json",
+  "channels": [
+    {
+      "server": "chat0110",
+      "displayName": "CHAT.0110"
+    }
+  ]
+}

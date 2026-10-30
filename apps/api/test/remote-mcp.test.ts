@@ -13,6 +13,24 @@ import { FakeGitHub } from "./fake-github.ts";
 const ROOT = "https://chat.0110.digital",
   repo = "Alex011082/chat.0110",
   chat = "20261023-k7q2";
+
+test("MCP status/control изолированы сессией и reconnect не отменяет owner off",async()=>{
+ const f=await setup();
+ try{
+  f.fake.on("GET",/\/repos\/alex011082\/chat\.0110$/i,{body:{full_name:repo,name:"chat.0110",owner:{login:"Alex011082"},private:false,default_branch:"main",permissions:{push:true}}});
+  f.fake.on("GET",/\/pulls\?state=all&head=/,{body:[{number:1,title:"Chat",body:"<!-- chat0110\nchat_id: 20261023-k7q2\n-->",state:"open",draft:true,head:{ref:`chat/${chat}`,sha:"h",repo:{full_name:repo}},base:{ref:"main"},user:{login:"Alex011082"}}]});
+  const call=async(name:string,args:any)=>{const r=await(await f.remote.handle(f.request("tools/call",{name,arguments:args},f.token))).json();return r.result;};
+  f.dispatch.requestAuto(7,repo,chat,"codex",true);
+  const c=await call("chat0110_connect",{repo,chat_id:chat,author:"codex",alias:"codex-review"});const id=c.structuredContent.session_id;
+  expect(c.structuredContent.auto_enabled).toBe(false);
+  const status=await call("chat0110_status",{session_id:id});expect(status.structuredContent.version).toBe("2.1.0");expect(status.structuredContent.automatic).toBe(false);
+  expect((await call("chat0110_status",{})).isError).toBe(true);
+  const foreign=f.dispatch.register(8,repo,chat,"other","other","Other","codex");expect((await call("chat0110_status",{session_id:foreign.id})).isError).toBe(true);
+  await call("chat0110_set_auto_reply",{session_id:id,enabled:true});f.dispatch.enqueue("review-test",7,repo,chat,"m","q",[id]);
+  await call("chat0110_set_auto_reply",{session_id:id,enabled:false});expect(f.dispatch.chain("review-test",7)?.status).toBe("cancelled");
+  const re=await call("chat0110_connect",{repo,chat_id:chat,author:"codex",alias:"codex-review"});expect(re.structuredContent.auto_enabled).toBe(false);
+ }finally{f.db.close();}
+});
 async function setup() {
   const db = new Database(":memory:");
   const key = await importCookieKey(new Uint8Array(32).fill(7));
@@ -178,6 +196,9 @@ test("удалённый MCP требует OAuth, выдаёт события �
       )
     ).json();
     expect(take.result.structuredContent.claim).toBeString();
+    expect(take.result.structuredContent.final).toBe(true);
+    expect(take.result.structuredContent.step).toBe(0);
+    expect(take.result.structuredContent.expires_at).toBeGreaterThan(Date.now());
     expect(take.result.structuredContent.prompt).not.toContain("old-private-value");
     expect(dispatch.cloudTasks()).toEqual([]);
     const dup = await (
@@ -281,7 +302,7 @@ test("общая подписка не включает чаты; Stop отме�
     const connected = await (await f.remote.handle(f.request("tools/call", { name: "chat0110_connect", arguments: { repo: repo.toLowerCase(), chat_id: chat, author: "chatgpt" } }, f.token))).json();
     expect(connected).toMatchObject({ result: { structuredContent: { connected: true } } });
     expect(connected.result.structuredContent.session_id).toBe(a.id);
-    expect(f.dispatch.session(a.id, 7).auto_enabled).toBe(1);
+    expect(f.dispatch.session(a.id, 7).auto_enabled).toBe(0);
     expect(f.dispatch.session(b.id, 7).auto_enabled).toBe(0);
   } finally { f.db.close(); }
 });

@@ -64,6 +64,7 @@ export interface DispatchChain {
   expires_at?: number;
 }
 export interface DispatchView {
+  auto_requests?: Array<{author:string;enabled:boolean}>;
   sessions: AgentSession[];
   chains: DispatchChain[];
 }

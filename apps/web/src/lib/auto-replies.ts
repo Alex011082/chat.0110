@@ -71,6 +71,10 @@ export async function setAutoReply(
   if (!response.ok) throw new Error("auto-replies");
   return response.json();
 }
+export async function setAuthorAutoReply(chatKey:string,author:string,enabled:boolean):Promise<AutoReplyView>{
+ const response=await fetch(`/api/chats/${chatKey.split("/").map(encodeURIComponent).join("/")}/auto-replies`,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({author:canonicalMention(author),enabled})});
+ if(!response.ok)throw Error("auto-replies");return response.json();
+}
 
 /** Сессия видна до первого ответа: иначе выключенный новый ИИ нельзя запустить. */
 export function mergeAgentParticipants(history: import("@chat0110/chat-protocol").Participant[], sessions: AgentSession[]): import("@chat0110/chat-protocol").Participant[] {

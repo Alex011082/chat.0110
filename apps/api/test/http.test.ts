@@ -56,6 +56,18 @@ const post = (path: string, body: unknown, headers: Record<string, string> = {})
   new Request(PUBLIC + path, { method: "POST", body: JSON.stringify(body), headers: { origin: PUBLIC, "content-type": "application/json", ...headers } });
 
 describe("маршруты", () => {
+  test("исторический автор сохраняет intent без создания готовой сессии; нужен выбор точного id",async()=>{
+    const {app,fake,cookie,dispatch}=await setup();
+    fake.on("GET",/\/pulls\?state=all&head=/,{body:[{number:1,title:"Chat",body:"<!-- chat0110\nchat_id: 20261023-k7q2\n-->",state:"open",draft:true,head:{ref:"chat/20261023-k7q2",sha:"h",repo:{full_name:repoBody.full_name}},base:{ref:"main"},user:{login:"Alex011082"}}]});
+    const path="/api/chats/Alex011082/chat.0110/20261023-k7q2/auto-replies";
+    try{
+      const res=await app(post(path,{author:"claude",enabled:true},{cookie}));expect(res.status).toBe(200);const view=await res.json();expect(view.auto_requests).toContainEqual({author:"claude",enabled:true});expect(view.sessions.some((s:any)=>s.author==="claude")).toBe(false);
+      const a=dispatch.register(7,repoBody.full_name,"20261023-k7q2","new-session","claude","Claude");expect(a.auto_enabled).toBe(0);
+      expect((await app(post(path,{author:"claude",session_id:a.id,enabled:true},{cookie}))).status).toBe(400);
+      expect((await app(post(path,{session_id:a.id,enabled:true},{cookie}))).status).toBe(200);expect(dispatch.session(a.id,7).auto_enabled).toBe(1);
+      expect((await app(post(path,{author:"claude",enabled:true}))).status).toBe(401);
+    }finally{dispatch.close();}
+  });
   test("повтор обычного сообщения с request_id не дублирует GitHub", async () => {
     const { app, cookie, fake } = await setup();
     const files = new Map<string, string>();

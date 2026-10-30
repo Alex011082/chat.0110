@@ -57,6 +57,16 @@ export const REMOTE_TOOLS = [
     ...policy,
   },
   {
+    name:"chat0110_status",
+    description:"Read the exact connected session state: enabled intent, live transport and protocol version. Registration alone is not automatic delivery.",
+    inputSchema:schema({session_id:str},["session_id"]),annotations:annotations(true),...policy,
+  },
+  {
+    name:"chat0110_set_auto_reply",
+    description:"Enable or stop participation of this exact session only after the user requests it. Stop cancels unfinished chains; enabling does not revive them or launch a closed client.",
+    inputSchema:schema({session_id:str,enabled:{type:"boolean"}},["session_id","enabled"]),annotations:{...annotations(false),destructiveHint:true},...policy,
+  },
+  {
     name: "chat0110_take",
     description:
       "Claim an addressed turn once. If done=true do not answer again; if resumed=true inspect history and previous effects before continuing. Then call chat0110_context.",
@@ -186,17 +196,30 @@ export function createRemoteMcp(o: Options) {
               String(args.model ?? ""),
             );
       dispatch.touch(session.id);
-      dispatch.setAutoEnabled(uid, session.id, true);
+      if(dispatch.requestedAuto(uid,info.full_name,chat,author)===null)dispatch.setAutoEnabled(uid, session.id, true);
+      const enabled=!!dispatch.session(session.id,uid).auto_enabled;
       return {
         connected: true,
         alias: session.alias,
         session_id: session.id,
-        automatic: author === "chatgpt" && events.hasActive(p.connectionId),
+        auto_enabled:enabled,
+        automatic: enabled && author === "chatgpt" && events.hasActive(p.connectionId),
         next:
           author === "chatgpt"
             ? "Subscribe to chat0110.turn.ready with recipient chatgpt for automatic delivery."
             : "Call chat0110_pending with this session_id and wait=true while this session is active.",
       };
+    }
+    if(name==="chat0110_status"||name==="chat0110_set_auto_reply"){
+      if(typeof args.session_id!=="string"||!args.session_id.trim())throw badRequest("Нужен session_id из connect");
+      const session=dispatch.session(args.session_id,uid),repo=repoRef(session.repo);
+      await requireOpenChat(gh,repo,session.chat);
+      if(name==="chat0110_set_auto_reply"){
+        if(typeof args.enabled!=="boolean")throw badRequest("Нужен enabled boolean");
+        dispatch.setAutoEnabled(uid,session.id,args.enabled);if(args.enabled)void pump();
+      }
+      const data=view(uid,session.repo,session.chat),current=data.sessions.find(s=>s.id===session.id)!;
+      return {version:"2.1.0",session:current,automatic:!!current.auto_enabled&&(current.author==="chatgpt"?data.chatgpt.connected:!!current.delivery_ready),requires_live_client:true};
     }
     if (name === "chat0110_pending") {
       // Старый каталог клиента не должен расширять ожидание до всех сессий аккаунта.
@@ -231,8 +254,12 @@ export function createRemoteMcp(o: Options) {
       if (!claimed) throw new HttpError(409, "conflict", "Дождись предыдущего хода этого участника");
       dispatch.touch(task.session_id);
       dispatch.heartbeat(id, task.session_id, claimed.claim!);
+      const chain=dispatch.chain(task.chain_id,uid)!;
       return {
         task_id: id,
+        step: task.step,
+        final: task.step === JSON.parse(chain.route).length - 1,
+        expires_at: chain.expires_at,
         claim: claimed.claim,
         resumed: !!task.claim,
         prompt: (await privacy.scan(task.prompt)).text,
@@ -309,7 +336,7 @@ export function createRemoteMcp(o: Options) {
           resultType: "complete",
           supportedVersions: ["2026-07-28"],
           capabilities: { tools: {}, events: {} },
-          serverInfo: { name: "chat0110", version: "2.0.0" },
+          serverInfo: { name: "chat0110", version: "2.1.0" },
           instructions,
         });
       if (body.method === "initialize")
@@ -320,7 +347,7 @@ export function createRemoteMcp(o: Options) {
             ? body.params.protocolVersion
             : "2025-03-26",
           capabilities: { tools: {}, events: {} },
-          serverInfo: { name: "chat0110", version: "2.0.0" },
+          serverInfo: { name: "chat0110", version: "2.1.0" },
           instructions,
         });
       if (body.method === "ping") return respond({});

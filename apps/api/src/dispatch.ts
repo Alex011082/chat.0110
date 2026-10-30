@@ -64,6 +64,7 @@ export class DispatchStore {
     this.db.query("INSERT OR IGNORE INTO chain_limits SELECT id,? FROM chains").run(Date.now() + 15 * 60_000);
     if (!this.db.query<{ name: string }, []>("PRAGMA table_info(tasks)").all().some(column => column.name === "outcome"))
       this.db.exec("ALTER TABLE tasks ADD COLUMN outcome TEXT");
+    this.db.exec("CREATE TABLE IF NOT EXISTS auto_requests (uid INTEGER NOT NULL,repo TEXT NOT NULL,chat TEXT NOT NULL,author TEXT NOT NULL,enabled INTEGER NOT NULL,PRIMARY KEY(uid,repo,chat,author))");
   }
   preparePublication(requestId: string, uid: number, repo: string, chat: string, author: string, text: string, replyTo: unknown, legacyId?: string): { id: string; author: string } {
     if (!isAuthor(author)) throw badRequest("Логин не подходит как автор сообщения");
@@ -151,7 +152,22 @@ export class DispatchStore {
     this.db
       .query("INSERT INTO sessions (id,uid,repo,chat,external,alias,name,author,model,seen) VALUES (?,?,?,?,?,?,?,?,?,?)")
       .run(id, uid, repo, chat, external, alias, name, author, model, Date.now());
+    // Запрос по историческому имени не разрешает произвольной новой сессии выполнять задания.
+    if(this.requestedAuto(uid,repo,chat,author)!==null)this.db.query("UPDATE sessions SET auto_enabled=0 WHERE id=?").run(id);
     return this.session(id, uid);
+  }
+  requestedAuto(uid:number,repo:string,chat:string,author:string):boolean|null {
+    const row=this.db.query<{enabled:number},[number,string,string,string]>("SELECT enabled FROM auto_requests WHERE uid=? AND repo=? AND chat=? AND author=?").get(uid,repo.toLowerCase(),chat,canonicalMention(author));
+    return row ? !!row.enabled : null;
+  }
+  requestAuto(uid:number,repo:string,chat:string,author:string,enabled:boolean){
+    author=canonicalMention(author);repo=repo.toLowerCase();
+    if(!isAuthor(author))throw badRequest("Неверный автор участника");
+    this.db.transaction(()=>{
+      this.db.query("INSERT INTO auto_requests VALUES (?,?,?,?,?) ON CONFLICT(uid,repo,chat,author) DO UPDATE SET enabled=excluded.enabled").run(uid,repo,chat,author,enabled?1:0);
+      const sessions=this.db.query<{id:string},[number,string,string,string]>("SELECT id FROM sessions WHERE uid=? AND repo=? AND chat=? AND author=?").all(uid,repo,chat,author);
+      if(!enabled)for(const session of sessions)this.setAutoEnabled(uid,session.id,false);
+    })();
   }
   session(id: string, uid: number): SessionRow {
     const s = this.db.query<SessionRow, [string]>("SELECT * FROM sessions WHERE id=?").get(id);
@@ -177,8 +193,9 @@ export class DispatchStore {
     };
   }
   setAutoEnabled(uid: number, sessionId: string, enabled: boolean) {
-    this.session(sessionId, uid);
+    const session=this.session(sessionId, uid);
     this.db.transaction(() => {
+      this.db.query("INSERT INTO auto_requests VALUES (?,?,?,?,?) ON CONFLICT(uid,repo,chat,author) DO UPDATE SET enabled=excluded.enabled").run(uid,session.repo,session.chat,session.author,enabled?1:0);
       this.db.query("UPDATE sessions SET auto_generation=auto_generation+CASE WHEN auto_enabled!=? THEN 1 ELSE 0 END,auto_enabled=? WHERE id=?").run(enabled ? 1 : 0, enabled ? 1 : 0, sessionId);
       if (!enabled) {
         const active=this.db.query<ChainRow,[number]>("SELECT * FROM chains WHERE uid=? AND status IN ('preparing','waiting','running','interrupted')").all(uid);
@@ -376,6 +393,7 @@ export class DispatchStore {
       )
       .all(uid, repo.toLowerCase(), chat)
       .map((c) => ({ id: c.id, message_id: c.message_id, route: JSON.parse(c.route), step: c.step, status: c.status, expires_at: c.expires_at }));
-    return { sessions, chains };
+    const auto_requests=this.db.query<{author:string;enabled:number},[number,string,string]>("SELECT author,enabled FROM auto_requests WHERE uid=? AND repo=? AND chat=? ORDER BY author").all(uid,repo.toLowerCase(),chat).map(row=>({author:row.author,enabled:!!row.enabled}));
+    return { sessions, chains, auto_requests };
   }
 }

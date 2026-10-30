@@ -1,4 +1,5 @@
 import { ConnectAgents } from "./screens/ConnectAgents.tsx";
+import { Plugins } from "./screens/Plugins.tsx";
 import type { AppConfig, Me } from "@chat0110/chat-protocol";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { api, ApiFailure, mockRequested, setUnauthorizedHandler } from "./api.ts";
@@ -53,6 +54,7 @@ export function App() {
   };
 
   if (location.pathname === "/connect") return <ConnectAgents />;
+  if (location.pathname === "/plugins") return <Plugins />;
   if (auth.state === "loading") {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-ground" role="status" aria-label={s.loading}>

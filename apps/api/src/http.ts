@@ -264,17 +264,20 @@ export async function createApp(deps: AppDeps): Promise<App> {
         }
         if (rest.length === 1 && rest[0] === "auto-replies" && method === "POST") {
           const body = await readJson(req);
-          if (typeof body.session_id !== "string" || !body.session_id || typeof body.enabled !== "boolean")
-            throw badRequest("Нужны session_id и enabled");
-          const agent = dispatch.session(body.session_id, session.uid);
-          if (agent.repo !== `${repo.owner}/${repo.name}`.toLowerCase() || agent.chat !== chatId)
-            throw notFound("Сессия не найдена");
+          const bySession=typeof body.session_id==="string"&&!!body.session_id;
+          const byAuthor=typeof body.author==="string"&&!!body.author;
+          if (bySession===byAuthor || typeof body.enabled !== "boolean")
+            throw badRequest("Нужны ровно один session_id/author и enabled");
           const info = await gh.getRepo(repo);
           if (!info.can_push) throw forbidden("Нет права записи");
           const pull = await gh.findChatPull(repo, chatId);
           if (!pull) throw notFound("Чат не найден");
           if (pull.state !== "open") throw forbidden("Чат закрыт");
-          dispatch.setAutoEnabled(session.uid, agent.id, body.enabled);
+          if(bySession){
+            const agent=dispatch.session(body.session_id as string,session.uid);
+            if(agent.repo!==info.full_name.toLowerCase()||agent.chat!==chatId)throw notFound("Сессия не найдена");
+            dispatch.setAutoEnabled(session.uid,agent.id,body.enabled);
+          }else dispatch.requestAuto(session.uid,info.full_name,chatId,body.author as string,body.enabled);
           if (body.enabled && deps.background) void remote.pump();
           return json(200, remote.view(session.uid, info.full_name, chatId));
         }
@@ -439,6 +442,14 @@ export async function createApp(deps: AppDeps): Promise<App> {
     const info = await gh.getRepo(repo);
     if (!info.can_push) throw forbidden("Нет права записи");
     dispatch.touch(session.id);
+    if(path==="/api/agent/status"||path==="/api/agent/auto-replies"){
+      await requireOpenChat(gh,repo,session.chat);
+      if(path.endsWith("auto-replies")){
+        if(typeof body.enabled!=="boolean")throw badRequest("Нужен enabled boolean");
+        dispatch.setAutoEnabled(user.id,session.id,body.enabled);
+      }
+      return json(200,{version:"2.1.0",session:dispatch.list(user.id,session.repo,session.chat).sessions.find(s=>s.id===session.id),requires_live_client:true});
+    }
     if (path === "/api/agent/next") {
       const pull = await gh.findChatPull(repo, session.chat);
       if (!pull || pull.state !== "open") throw new HttpError(409, "conflict", "Чат закрыт");
