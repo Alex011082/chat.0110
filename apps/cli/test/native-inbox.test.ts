@@ -148,7 +148,7 @@ test("runner связывает HTTP-очередь с inbox и восстана
           prompts++;
           expect(await runHelper(["context","--state",state,"--task",id])).toBe(0);
           const answer=join(dir,"answer.txt");writeFileSync(answer,"fixture final answer");
-          expect(await runHelper(["reply","--state",state,"--task",id,"--answer",answer,"--outcome","complete"])).toBe(1);
+          expect(await runHelper(["reply","--state",state,"--task",id,"--answer",answer,"--outcome","complete"])).toBe(0);
         }
       })().catch(e=>{peerError=e;});
     });
