@@ -444,11 +444,15 @@ export async function createApp(deps: AppDeps): Promise<App> {
       if (!pull || pull.state !== "open") throw new HttpError(409, "conflict", "Чат закрыт");
       const until = Date.now() + (body.wait === true ? 25_000 : 0);
       let task;
-      do {
-        task = dispatch.claim(session.id);
-        if (task || Date.now() >= until || req.signal.aborted) break;
-        await Bun.sleep(500);
-      } while (true);
+      const stopWaiting = body.wait === true ? dispatch.waiting(session.id, user.id) : () => {};
+      req.signal.addEventListener("abort", stopWaiting, { once: true });
+      try {
+        do {
+          task = dispatch.claim(session.id);
+          if (task || Date.now() >= until || req.signal.aborted) break;
+          await Bun.sleep(500);
+        } while (true);
+      } finally { stopWaiting(); req.signal.removeEventListener("abort", stopWaiting); }
       if (!task) return json(200, { task: null });
       const chain = dispatch.chain(task.chain_id, user.id)!;
       return json(200, {
@@ -458,9 +462,10 @@ export async function createApp(deps: AppDeps): Promise<App> {
         chat_id: session.chat,
         url: `${config.publicUrl}/${session.repo}/${session.chat}`,
         final: task.step === JSON.parse(chain.route).length - 1,
+        expires_at: chain.expires_at,
       });
     }
-    const task = dispatch.task(String(body.task_id), session.id, String(body.claim));
+    const task = dispatch.task(String(body.task_id), session.id, String(body.claim), path === "/api/agent/complete");
     if (path === "/api/agent/heartbeat") {
       dispatch.heartbeat(task.id, session.id, String(body.claim));
       return json(200, { ok: true });
@@ -471,7 +476,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
         throw badRequest("Нужен ответ до 60000 знаков");
       // Одинаковый id и сохранённый текст делают повтор после обрыва безопасным.
       body.text = (await privacy.scan(body.text.replace(/\r\n?/g, "\n").trim())).text;
-      dispatch.prepareAnswer(task.id, session.id, String(body.claim), body.text as string);
+      dispatch.prepareAnswer(task.id, session.id, String(body.claim), body.text as string, body.outcome === undefined ? "continue" : String(body.outcome));
       const pull = await gh.findChatPull(repo, session.chat);
       if (!pull || pull.state !== "open") throw new HttpError(409, "conflict", "Чат закрыт");
       const item = await postMessage(

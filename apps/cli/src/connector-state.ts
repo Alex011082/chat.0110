@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 export interface PendingTurn {
   task: { id: string; claim: string };
   answer?: string;
+  outcome?: string;
   resumed?: boolean;
   [key: string]: unknown;
 }

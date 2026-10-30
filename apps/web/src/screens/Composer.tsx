@@ -164,14 +164,14 @@ export function Composer(p: ComposerProps) {
                 .join(" → ")}{" "}
               · {Math.min(chain.step + 1, chain.route.length)}/{chain.route.length} · {d.status[chain.status]}
             </span>
-            <button
+            {!["expired", "needs_owner"].includes(chain.status) ? <button
               type="button"
               disabled={!p.canPush || sending}
               className="min-h-9 shrink-0 border-0 bg-transparent text-action-ink"
               onClick={() => void dispatchRequest(p.chatKey, chain.id).then(setDispatch, () => setStopError(true))}
             >
               {d.stop}
-            </button>
+            </button> : null}
           </div>
         ))}
       {stopError ? <span role="alert">{d.failed}</span> : null}

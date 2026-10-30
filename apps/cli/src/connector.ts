@@ -87,7 +87,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: "chat0110_reply",
       description:
         "Publish the completed answer to GitHub and hand off to the next participant. Use only for the final answer of this turn, not progress.",
-      inputSchema: object({ task_id: string, text: string }, ["task_id", "text"]),
+      inputSchema: object({ task_id: string, text: string, outcome: { type: "string", enum: ["continue", "complete", "needs_owner"] } }, ["task_id", "text"]),
     },
   ],
 }));
@@ -148,11 +148,15 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
           if (typeof args.text !== "string" || !args.text.trim() || args.text.length > 60000)
             throw new Error("Reply must contain 1–60000 characters.");
           const answer = args.text.trim();
-          if (current.answer && current.answer !== answer)
+          const outcome = args.outcome ?? "continue";
+          if (typeof outcome !== "string" || !["continue", "complete", "needs_owner"].includes(outcome))
+            throw new Error("Invalid turn outcome.");
+          if (current.answer && (current.answer !== answer || (current.outcome ?? "continue") !== outcome))
             throw new Error("An answer was already submitted. Retry the same text after checking context.");
           current.answer = answer;
+          current.outcome = outcome;
           save();
-          result = await call("complete", { ...payload, text: answer });
+          result = await call("complete", { ...payload, text: answer, outcome });
           current = null;
           save();
         } else throw new Error("Unknown tool");

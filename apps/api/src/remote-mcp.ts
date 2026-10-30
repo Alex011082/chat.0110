@@ -75,8 +75,8 @@ export const REMOTE_TOOLS = [
   {
     name: "chat0110_reply",
     description:
-      "Publish the finished answer to the chat Git branch and release the next participant. Do not use for progress reports. The same answer is safe to retry after a lost response.",
-    inputSchema: schema({ task_id: str, claim: str, text: str }, ["task_id", "claim", "text"]),
+      "Publish one finished answer. outcome=needs_owner stops for owner input, complete finishes early, continue follows the finite route. Chains expire after 15 minutes. Late replies are saved without waking another participant. Retry with the identical text and outcome after a lost response.",
+    inputSchema: schema({ task_id: str, claim: str, text: str, outcome: { type: "string", enum: ["continue", "complete", "needs_owner"] } }, ["task_id", "claim", "text"]),
     annotations: annotations(false),
     ...policy,
   },
@@ -160,7 +160,7 @@ export function createRemoteMcp(o: Options) {
       pumping = false;
     }
   }
-  async function tool(p: McpPrincipal, name: string, args: Record<string, unknown>) {
+  async function tool(p: McpPrincipal, name: string, args: Record<string, unknown>, signal: AbortSignal) {
     const gh = ghFor(p),
       uid = p.session.uid;
     if (name === "chat0110_account") return { id: `github:${uid}`, name: p.session.login, nickname: p.session.login };
@@ -205,15 +205,19 @@ export function createRemoteMcp(o: Options) {
       const author = canonicalMention(String(args.author ?? "chatgpt"));
       const until = Date.now() + (args.wait === true ? 25_000 : 0);
       let ready;
-      do {
-        ready = dispatch.remoteReady(uid, author, args.session_id);
-        if (ready.length || Date.now() >= until) break;
-        await Bun.sleep(500);
-      } while (true);
+      const stopWaiting = args.wait === true ? dispatch.waiting(args.session_id, uid, author) : () => {};
+      signal.addEventListener("abort", stopWaiting, { once: true });
+      try {
+        do {
+          ready = dispatch.remoteReady(uid, author, args.session_id);
+          if (ready.length || Date.now() >= until || signal.aborted) break;
+          await Bun.sleep(500);
+        } while (true);
+      } finally { stopWaiting(); signal.removeEventListener("abort", stopWaiting); }
       return { turns: ready };
     }
     const id = String(args.task_id),
-      task = dispatch.ownedTask(id, uid);
+      task = dispatch.ownedTask(id, uid, name === "chat0110_reply");
     if (!task.external.startsWith("cloud:") && !task.external.startsWith("remote:"))
       throw forbidden("Ход принадлежит локальному коннектору");
     const repo = repoRef(task.repo);
@@ -237,7 +241,7 @@ export function createRemoteMcp(o: Options) {
         chat_id: task.chat,
       };
     }
-    dispatch.task(id, task.session_id, String(args.claim));
+    dispatch.task(id, task.session_id, String(args.claim), name === "chat0110_reply");
     if (name === "chat0110_context") {
       dispatch.heartbeat(id, task.session_id, String(args.claim));
       return { prompt: (await privacy.scan(task.prompt)).text, reply_to: task.reply_to, timeline: await getTimeline(gh, repo, task.chat, privacy) };
@@ -246,7 +250,7 @@ export function createRemoteMcp(o: Options) {
       if (typeof args.text !== "string" || !args.text.trim() || args.text.length > 60_000)
         throw badRequest("Нужен ответ до 60000 знаков");
       args.text = (await privacy.scan(args.text.replace(/\r\n?/g, "\n").trim())).text;
-      dispatch.prepareAnswer(id, task.session_id, String(args.claim), args.text as string);
+      dispatch.prepareAnswer(id, task.session_id, String(args.claim), args.text as string, args.outcome === undefined ? "continue" : String(args.outcome));
       const item = await postMessage(
         { gh, user: { login: p.session.login, id: uid }, privacy },
         repo,
@@ -342,7 +346,7 @@ export function createRemoteMcp(o: Options) {
         return respond({});
       }
       if (body.method === "tools/call") {
-        const result = await privacy.object(await tool(principal, String(body.params?.name), body.params?.arguments ?? {}));
+        const result = await privacy.object(await tool(principal, String(body.params?.name), body.params?.arguments ?? {}, req.signal));
         return respond({ content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result });
       }
       return json(

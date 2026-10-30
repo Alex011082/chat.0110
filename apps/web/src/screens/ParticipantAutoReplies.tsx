@@ -3,6 +3,7 @@ import { canonicalMention } from "@chat0110/chat-protocol";
 import { useState } from "react";
 import {
   autoReplyLaunchUrl,
+  agentDeliveryState,
   setAutoReply,
   type AutoReplyView,
 } from "../lib/auto-replies.ts";
@@ -70,9 +71,7 @@ export function ParticipantAutoReplies({
         </>
       ) : (
         sessions.map((session) => {
-          const ready =
-            session.auto_enabled &&
-            (chatgpt ? view.chatgpt?.connected : session.online);
+          const deliveryState = agentDeliveryState(session, view);
           return (
             <div key={session.id} className="flex flex-col gap-2">
               {sessions.length > 1 ? (
@@ -81,18 +80,20 @@ export function ParticipantAutoReplies({
                 </span>
               ) : null}
               <span role="status" className="text-cap text-ink-2">
-                {ready
+                {deliveryState === "working"
+                  ? en ? "Answering" : "Отвечает"
+                  : deliveryState === "waiting"
                   ? en
-                    ? "Automatic replies are on"
-                    : "Автоответы включены"
+                    ? "Listening for addressed turns"
+                    : "Ожидает адресованные сообщения"
                   : session.auto_enabled
                     ? chatgpt
                       ? en
                         ? "Waiting for the ChatGPT subscription"
                         : "Ожидаем подписку ChatGPT"
                       : en
-                        ? "Enabled · waiting for the session"
-                        : "Включены · ждём сессию"
+                        ? "Enabled · waiting for a delivery channel"
+                        : "Включены · ждём канал доставки"
                     : en
                       ? "Automatic replies are off"
                       : "Автоответы выключены"}

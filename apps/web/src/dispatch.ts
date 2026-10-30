@@ -46,6 +46,8 @@ export const dispatchText = (en: boolean) =>
           done: "completed",
           cancelled: "stopped",
           interrupted: "connection lost — awaiting the same session",
+          expired: "15-minute limit reached — stopped",
+          needs_owner: "waiting for your decision — stopped",
         },
       }
     : {
@@ -73,5 +75,7 @@ export const dispatchText = (en: boolean) =>
           done: "завершено",
           cancelled: "остановлено",
           interrupted: "связь потеряна — ждёт ту же сессию",
+          expired: "истекли 15 минут — остановлено",
+          needs_owner: "нужно твоё решение — остановлено",
         },
       };
