@@ -103,6 +103,7 @@ export function setUnauthorizedHandler(fn: (() => void) | null): void {
 }
 
 async function request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+  if (method==="POST" && typeof navigator!=="undefined" && navigator.onLine===false) throw new ApiFailure(0,"network",s.errors.network);
   const init: RequestInit = {
     method,
     credentials: "same-origin",

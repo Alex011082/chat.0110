@@ -1,7 +1,7 @@
-import { memo } from "react";
+import { memo, useSyncExternalStore } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { s } from "../strings.ts";
+import { s, getLocale, subscribeLocale } from "../strings.ts";
 
 // Сообщения пишут и агенты, поэтому сырой HTML не показываем вовсе (skipHtml),
 // а чужие картинки не грузим: вместо них — ссылка с подписью.
@@ -24,6 +24,7 @@ const components: Components = {
 const plugins = [remarkGfm];
 
 export const Markdown = memo(function Markdown({ text, className }: { text: string; className?: string }) {
+  useSyncExternalStore(subscribeLocale,getLocale,getLocale);
   return (
     <div className={className ? `md ${className}` : "md"}>
       <ReactMarkdown remarkPlugins={plugins} skipHtml components={components}>

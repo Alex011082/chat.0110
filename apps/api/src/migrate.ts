@@ -12,6 +12,8 @@ import {
 } from "@chat0110/chat-protocol";
 import { forbidden } from "./errors.ts";
 import { GitHubError, mapLimit, type ChatPull, type GitHubClient, type RepoRef } from "./github.ts";
+import { defaultPrivacy, type Privacy } from "./privacy.ts";
+import { cleanConversationFile } from "./privacy-files.ts";
 
 const COMMIT = (chatId: string) => `chat0110: перенести чат ${chatId} в Chat/`;
 
@@ -31,7 +33,7 @@ export async function migrationStatus(gh: GitHubClient, repo: RepoRef): Promise<
   };
 }
 
-export async function migrateChats(gh: GitHubClient, repo: RepoRef): Promise<ChatMigration> {
+export async function migrateChats(gh: GitHubClient, repo: RepoRef, privacy: Privacy = defaultPrivacy): Promise<ChatMigration> {
   const info = await gh.getRepo(repo);
   if (!info.can_push) throw forbidden(`Нет права на запись в ${info.full_name}: перенести чаты нельзя`);
   const pulls = await gh.listChatPulls(repo);
@@ -39,7 +41,7 @@ export async function migrateChats(gh: GitHubClient, repo: RepoRef): Promise<Cha
   for (const pull of pulls) {
     const row = await load(gh, repo, pull);
     if (!row) continue;
-    items.push(row.item.status === "pending" ? await commitChat(gh, repo, pull, row) : row.item);
+    items.push(row.item.status === "pending" ? await commitChat(gh, repo, pull, row, privacy) : row.item);
   }
   return { repo: info.full_name, can_push: true, items };
 }
@@ -84,12 +86,16 @@ function itemFromPlan(base: Omit<ChatMigrationItem, "status">, plan: MigratePlan
   return { ...base, status: "migrated" };
 }
 
-async function commitChat(gh: GitHubClient, repo: RepoRef, pull: ChatPull, row: Loaded): Promise<ChatMigrationItem> {
+async function commitChat(gh: GitHubClient, repo: RepoRef, pull: ChatPull, row: Loaded, privacy: Privacy): Promise<ChatMigrationItem> {
   assertOwned(pull.chatId, row.create.map((file) => file.path));
   let head = await gh.getBranchHead(repo, pull.headRef);
   let create = row.create;
   for (let attempt = 1; ; attempt++) {
     if (create.length === 0) return { ...row.item, status: "migrated" };
+    for (const file of create) {
+      if (await cleanConversationFile(privacy, file.path, file.content) !== file.content)
+        throw forbidden("Старый чат содержит чувствительные данные. Автоматический перенос остановлен до отдельной очистки истории.");
+    }
     const tree = await gh.createTree(repo, await gh.getCommitTree(repo, head), create);
     const commit = await gh.createCommit(repo, COMMIT(pull.chatId), tree, [head]);
     try {

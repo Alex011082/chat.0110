@@ -1,11 +1,12 @@
 // Вход через GitHub App (user-to-server токен): все чтения и записи потом
 // идут от имени пользователя и в пределах его прав. Приватный ключ App не нужен.
 import { timingSafeEqual } from "node:crypto";
+import { isChatId } from "@chat0110/chat-protocol";
 import { isLoginAllowed, type Config } from "./config.ts";
 import { HttpError } from "./errors.ts";
 import { GitHubClient, type Fetch } from "./github.ts";
 import { htmlPage } from "./html.ts";
-import { exchangeToken, sessionFromTokens, type SessionStore } from "./session.ts";
+import { exchangeToken, sessionFromTokens, readCookie, type SessionStore } from "./session.ts";
 
 const AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 
@@ -40,21 +41,34 @@ export function createAuth(deps: AuthDeps) {
   const redirectUri = `${config.publicUrl}/auth/callback`;
   const retry = { href: "/auth/login", label: "Войти ещё раз" };
 
+  const nextCookieName = config.devCookies ? "chat0110_dev_next" : "__Host-chat0110_next";
+  const nextAttrs = `; Path=/; HttpOnly${config.devCookies ? "" : "; Secure"}; SameSite=Lax; Max-Age=`;
+  const safeNext = (value: string | null) => {
+    if (!value || value.length>4096 || /[\\\s\x00-\x1f]|%0[ad]|%5c/i.test(value)) return "/";
+    if (/^\/oauth\/authorize\?/.test(value) || /^\/connect(?:\?|$)/.test(value)) return value;
+    const path=value.split(/[?#]/)[0]!;
+    const match=path.match(/^\/([A-Za-z0-9_.-]{1,100})\/([A-Za-z0-9_.-]{1,100})(?:\/([^/]+))?$/);
+    return match && !["api","auth","oauth","mcp"].includes(match[1]!.toLowerCase()) && (!match[3] || match[3]==="~tree" || isChatId(match[3])) ? value : "/";
+  };
   return {
-    login(): Response {
+    login(req?: Request): Response {
       const state = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
       const url = new URL(AUTHORIZE_URL);
       url.searchParams.set("client_id", config.clientId);
       url.searchParams.set("redirect_uri", redirectUri);
       url.searchParams.set("state", state);
-      return redirect(url.toString(), [sessions.stateCookie(state)]);
+      const next = req ? safeNext(new URL(req.url).searchParams.get("next")) : "/";
+      return redirect(url.toString(), [
+        sessions.stateCookie(state),
+        `${nextCookieName}=${encodeURIComponent(next)}${nextAttrs}600`,
+      ]);
     },
 
     async callback(req: Request): Promise<Response> {
       const params = new URL(req.url).searchParams;
       const state = params.get("state") ?? "";
       const expected = sessions.readState(req) ?? "";
-      const clear = [sessions.clearStateCookie()];
+      const clear = [sessions.clearStateCookie(), `${nextCookieName}=${nextAttrs}0`];
 
       if (!state || !expected || !sameState(state, expected)) {
         // Возврат после установки App приходит без нашего state. Код из него
@@ -62,10 +76,16 @@ export function createAuth(deps: AuthDeps) {
         // аккаунт атакующего (login CSRF). Просто начинаем вход заново —
         // GitHub уже знает пользователя и сразу вернёт его с правильным state.
         if (params.get("setup_action")) return redirect("/auth/login", clear);
-        return withCookies(htmlPage(400, "Вход не удался", "Проверочная cookie потерялась или устарела. Начните вход заново.", retry), clear);
+        return withCookies(
+          htmlPage(400, "Вход не удался", "Проверочная cookie потерялась или устарела. Начните вход заново.", retry),
+          clear,
+        );
       }
       if (params.get("error")) {
-        return withCookies(htmlPage(400, "Вход отменён", "GitHub не подтвердил вход. Можно попробовать снова.", retry), clear);
+        return withCookies(
+          htmlPage(400, "Вход отменён", "GitHub не подтвердил вход. Можно попробовать снова.", retry),
+          clear,
+        );
       }
       const code = params.get("code");
       if (!code) return withCookies(htmlPage(400, "Вход не удался", "GitHub не прислал код входа.", retry), clear);
@@ -85,10 +105,14 @@ export function createAuth(deps: AuthDeps) {
           );
         }
         const session = sessionFromTokens(tokens, user, now());
-        return redirect("/", [...clear, await sessions.cookieFor(session)]);
+        let next = "/";
+        try {
+          next = safeNext(decodeURIComponent(readCookie(req, nextCookieName) ?? "/"));
+        } catch {}
+        return redirect(next, [...clear, await sessions.cookieFor(session)]);
       } catch (e) {
         const why = e instanceof HttpError ? e.message : "GitHub не ответил";
-        if (!(e instanceof HttpError)) console.error("вход: сбой обмена кода", e);
+        if (!(e instanceof HttpError)) console.error("вход: сбой обмена кода");
         return withCookies(htmlPage(400, "Вход не удался", why, retry), clear);
       }
     },

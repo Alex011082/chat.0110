@@ -1,5 +1,5 @@
-// Сессия без базы данных: токены пользователя лежат в cookie, зашифрованной
-// AES-256-GCM. GCM ещё и подписывает — подделанная cookie просто не расшифруется.
+// Cookie зашифрована AES-256-GCM. Для подключённого MCP свежая сессия также
+// хранится на сервере: браузер и агент делят одноразовый refresh GitHub.
 import { HttpError } from "./errors.ts";
 import type { Fetch } from "./github.ts";
 
@@ -17,6 +17,11 @@ export interface TokenSet {
   expires_in?: number;
   refresh_token?: string;
   refresh_token_expires_in?: number;
+}
+
+export interface SessionPersistence {
+  load(uid: number): Promise<SessionData | null>;
+  save(data: SessionData): Promise<void>;
 }
 
 const AAD = new TextEncoder().encode("chat0110:session:v1");
@@ -114,6 +119,7 @@ export class SessionStore {
   private readonly clientSecret: string;
   private readonly fetcher: Fetch;
   private readonly now: () => number;
+  private persistence?: SessionPersistence;
   // Refresh-токены GitHub одноразовые и ротируются. Две вкладки (или SSE и
   // fetch) со старой cookie одновременно пойдут обновляться, и вторая получит
   // bad_refresh_token — пользователя выкинет. Поэтому: одно обновление на
@@ -138,7 +144,18 @@ export class SessionStore {
     return `; Path=/; HttpOnly${this.dev ? "" : "; Secure"}; SameSite=Lax; Max-Age=${maxAge}`;
   }
 
+  setPersistence(persistence: SessionPersistence): void {
+    this.persistence = persistence;
+  }
+
+  private async latest(data: SessionData): Promise<SessionData> {
+    const saved = await this.persistence?.load(data.uid);
+    return saved && saved.uid === data.uid && saved.exp > data.exp ? saved : data;
+  }
+
   async cookieFor(data: SessionData): Promise<string> {
+    await this.persistence?.save(data);
+    data = await this.latest(data);
     const maxAge = Math.max(0, Math.floor((data.rexp - this.now()) / 1000));
     return `${this.cookieName}=${await seal(this.key, data)}${this.attrs(maxAge)}`;
   }
@@ -163,18 +180,23 @@ export class SessionStore {
     const raw = readCookie(req, this.cookieName);
     if (!raw) return null;
     const now = this.now();
-    const session = await unseal(this.key, raw, now);
-    if (!session) return null;
+    const original = await unseal(this.key, raw, now);
+    if (!original) return null;
+    const session = await this.latest(original);
+    await this.persistence?.save(session);
     if (!session.rt || session.exp - now > REFRESH_AHEAD_MS) {
-      return session.exp > now ? { session } : null;
+      return session.exp > now ? { session, ...(session !== original ? { setCookie: await this.cookieFor(session) } : {}) } : null;
     }
     try {
-      const fresh = await this.refresh(session);
+      let fresh = await this.refresh(session);
+      await this.persistence?.save(fresh);
+      fresh = await this.latest(fresh);
       return { session: fresh, setCookie: await this.cookieFor(fresh) };
     } catch {
       // Обновить не вышло (сеть, отозванный токен). Пока access жив — работаем,
       // дальше пользователь просто войдёт заново.
-      return session.exp > now ? { session } : null;
+      const saved = await this.latest(session);
+      return saved.exp > now ? { session: saved, ...(saved !== original ? { setCookie: await this.cookieFor(saved) } : {}) } : null;
     }
   }
 

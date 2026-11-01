@@ -1,3 +1,4 @@
+import { testPrivacy } from "./privacy-fixture.ts";
 import { describe, expect, test } from "bun:test";
 import { buildPrBody, gapComments, parseMessageFile, parsePrBody, serializeDecisionFile, type DecisionEvent } from "@chat0110/chat-protocol";
 import { CHATS_AGENTS_MD } from "../src/agents-md.ts";
@@ -26,6 +27,7 @@ const repoBody = (push = true) => ({
 function ctx(fake: FakeGitHub, rands: string[] = [], login = "Alex011082"): ChatCtx {
   let i = 0;
   return {
+    privacy: testPrivacy,
     gh: new GitHubClient({ token: "ghu", userId: 7, fetch: fake.fetch, caches: createCaches() }),
     user: { login, id: 7 },
     now: () => NOW,
@@ -92,7 +94,7 @@ describe("список чатов", () => {
     const fake = new FakeGitHub()
       .on("GET", R, { body: repoBody() })
       .on("GET", /\/pulls\?state=all&sort=updated/, { body: [chatPr({ title: "[chat] RoboChain — захват", draft: false }), chatPr({ number: 6, head: { ref: "feature/x", sha: "x", repo: { full_name: "Alex011082/chat.0110" } } })] });
-    expect(await listChats(ctx(fake).gh, REPO)).toEqual([{
+    expect(await listChats(ctx(fake).gh, REPO, testPrivacy)).toEqual([{
       repo: "Alex011082/chat.0110", chat_id: CHAT, title: "RoboChain — захват", number: 5, state: "open", draft: false,
       branch: BRANCH, url: "https://github.com/Alex011082/chat.0110/pull/5",
       created_at: "2026-10-23T10:02:00Z", updated_at: "2026-10-23T10:40:00Z", created_by: "alex011082", parent: null,
@@ -104,7 +106,7 @@ describe("список чатов", () => {
     const fake = new FakeGitHub()
       .on("GET", R, { body: repoBody() })
       .on("GET", /\/pulls\?state=all&sort=updated/, { body: [childPr(7, parent), chatPr()] });
-    const list = await listChats(ctx(fake).gh, REPO);
+    const list = await listChats(ctx(fake).gh, REPO, testPrivacy);
     expect(list.map((c) => [c.chat_id, c.parent])).toEqual([[CHILD, parent], [CHAT, null]]);
     expect(fake.find("GET", /\/contents\//).length).toBe(0);
   });
@@ -168,9 +170,18 @@ describe("лента чата", () => {
       .on("GET", `${R}/contents/${DDIR}`, NOT_FOUND);
   }
 
+  test("старые комментарии GitHub очищаются в выдаче без переписывания истории", async () => {
+    const fake = timelineFake().on("GET", `${R}/issues/5/comments`, { body: [{ id: 777, user: { login: "Alex011082" }, body: "password=old-private-value; private@example.org", created_at: "2026-10-23T11:00:00Z", html_url: "https://github.com/comment/777" }] });
+    const result = await getTimeline(ctx(fake).gh, REPO, CHAT, testPrivacy);
+    const safe = JSON.stringify(result);
+    expect(safe).not.toContain("old-private-value");
+    expect(safe).not.toContain("private@example.org");
+    expect(safe).toContain("[SECRET_1]");
+    expect(fake.calls.every((c) => c.method === "GET")).toBe(true);
+  });
   test("собирает TimelineInput из GitHub и отдаёт ленту с участниками", async () => {
     const fake = timelineFake();
-    const res = await getTimeline(ctx(fake).gh, REPO, CHAT);
+    const res = await getTimeline(ctx(fake).gh, REPO, CHAT, testPrivacy);
 
     expect(res.chat).toMatchObject({
       repo: "Alex011082/chat.0110", chat_id: CHAT, number: 5, title: "RoboChain — захват", head_sha: "headsha", can_push: true,
@@ -233,7 +244,7 @@ describe("лента чата", () => {
         ],
       })
       .on("GET", `${R}/pulls/10/files`, { body: [] });
-    const res = await getTimeline(ctx(fake).gh, REPO, CHAT);
+    const res = await getTimeline(ctx(fake).gh, REPO, CHAT, testPrivacy);
 
     expect(res.items.filter((i) => i.kind === "agent_pr").map((i) => i.id).sort()).toEqual(["pr10", "pr9"]);
     expect(fake.find("GET", `${R}/pulls/7/files`).length + fake.find("GET", `${R}/pulls/8/files`).length).toBe(0);
@@ -251,7 +262,7 @@ describe("лента чата", () => {
 
   test("нет PR чата — not_found", async () => {
     const fake = new FakeGitHub().on("GET", R, { body: repoBody() }).on("GET", /\/pulls\?state=all&head=/, { body: [] });
-    expect((await failure(getTimeline(ctx(fake).gh, REPO, CHAT))).code).toBe("not_found");
+    expect((await failure(getTimeline(ctx(fake).gh, REPO, CHAT, testPrivacy))).code).toBe("not_found");
   });
 
   test("решения: карточки в ленте и свёрнутые decisions; коммит с одними решениями — не push", async () => {
@@ -270,7 +281,7 @@ describe("лента чата", () => {
         ],
       })
       .on("GET", `${R}/commits/c4`, { body: { files: [{ filename: `${DDIR}/${D1}.md`, status: "added" }, { filename: `${DDIR}/${D1A}.md`, status: "added" }] } });
-    const res = await getTimeline(ctx(fake).gh, REPO, CHAT);
+    const res = await getTimeline(ctx(fake).gh, REPO, CHAT, testPrivacy);
 
     expect(fake.find("GET", `${R}/contents/${DDIR}`)[0]!.url.searchParams.get("ref")).toBe(BRANCH);
     expect(res.decisions.map((d) => [d.id, d.status])).toEqual([[D1, "accepted"], [D2, "proposed"]]);
@@ -334,7 +345,7 @@ describe("лента дочернего чата", () => {
 
   test("inherited: сообщения родителя на коммите ветвления; история родителя не в ленте", async () => {
     const fake = childFake();
-    const res = await getTimeline(ctx(fake).gh, REPO, CHILD);
+    const res = await getTimeline(ctx(fake).gh, REPO, CHILD, testPrivacy);
 
     expect(res.chat.parent).toEqual(PARENT);
     expect(res.chat.meta?.parent).toEqual({ ...PARENT, reason: "Механика" });
@@ -360,8 +371,8 @@ describe("лента дочернего чата", () => {
   test("снимок на коммите неизменен: второй раз (и другому пользователю) — из кеша", async () => {
     const fake = childFake();
     const caches = createCaches();
-    await getTimeline(new GitHubClient({ token: "a", userId: 1, fetch: fake.fetch, caches }), REPO, CHILD);
-    const again = await getTimeline(new GitHubClient({ token: "b", userId: 2, fetch: fake.fetch, caches }), REPO, CHILD);
+    await getTimeline(new GitHubClient({ token: "a", userId: 1, fetch: fake.fetch, caches }), REPO, CHILD, testPrivacy);
+    const again = await getTimeline(new GitHubClient({ token: "b", userId: 2, fetch: fake.fetch, caches }), REPO, CHILD, testPrivacy);
     expect(again.inherited?.items.map((i) => i.id)).toEqual([A, C]);
     expect(fake.find("GET", `${R}/contents/${DIR}`).length).toBe(1);
     expect(fake.find("GET", /\/git\/blobs\//).length).toBe(2);
@@ -376,7 +387,7 @@ describe("лента дочернего чата", () => {
       dev({ id: P2, action: "propose", author: "bob", created_at: "2026-10-23T11:35:00.000Z", title: "Чужой", from_chat: "20261023-zzzz" }),
       dev({ id: D1, action: "propose", title: "Своё решение родителя" }),
     ]);
-    const res = await getTimeline(ctx(fake).gh, REPO, CHILD);
+    const res = await getTimeline(ctx(fake).gh, REPO, CHILD, testPrivacy);
     expect(res.outgoing.map((d) => [d.id, d.status, d.from_chat])).toEqual([[P1, "accepted", CHILD]]);
     expect(res.decisions).toEqual([]);
     // Папка решений родителя читается на голове его ветки, а не на коммите Fork.
@@ -385,7 +396,7 @@ describe("лента дочернего чата", () => {
 
   test("нет chat.json — родитель из тела PR; PR родителя не найден — номер null, название = id", async () => {
     const fake = childFake({ chatJson: null, list: [childPr(7, PARENT)] });
-    const res = await getTimeline(ctx(fake).gh, REPO, CHILD);
+    const res = await getTimeline(ctx(fake).gh, REPO, CHILD, testPrivacy);
     expect(res.chat.meta).toBeNull();
     expect(res.inherited).toMatchObject({ chat_id: CHAT, title: CHAT, number: null, message_id: C, commit_sha: S2 });
     expect(res.inherited?.items.length).toBe(2);
@@ -407,7 +418,7 @@ describe("лента дочернего чата", () => {
       ],
     };
     const fake = childFake().on("GET", `${R}/contents/chats/${CHILD}/context.json`, { body: { content: b64(JSON.stringify(snap)) } });
-    const res = await getTimeline(ctx(fake).gh, REPO, CHILD);
+    const res = await getTimeline(ctx(fake).gh, REPO, CHILD, testPrivacy);
     expect(res.inherited?.complete).toBe(true);
     expect(res.inherited?.gaps).toEqual([]);
     expect(res.inherited?.items.map((m) => [m.origin_chat_id, m.id])).toEqual([[root, midMsg], [CHAT, A]]);
@@ -435,6 +446,15 @@ describe("создание чата", () => {
     return fake;
   }
 
+  test("название, первое сообщение и тело PR очищаются до Git Data API", async () => {
+    const fake = createFake();
+    await createChat(ctx(fake), REPO, { title: "private@example.org", first_message: "password=private-example-value" });
+    const payload = JSON.stringify(fake.calls.filter((c) => c.method !== "GET").map((c) => c.body));
+    expect(payload).not.toContain("private@example.org");
+    expect(payload).not.toContain("private-example-value");
+    expect(payload).toContain("[EMAIL_1]");
+    expect(payload).toContain("[SECRET_1]");
+  });
   test("один коммит: chat.json, протокол агентов, первое сообщение; draft PR с меткой", async () => {
     const fake = createFake();
     const res = await createChat(ctx(fake, ["q9w1", "k7q2"]), REPO, { title: "  RoboChain —\n захват ", first_message: "Нужны варианты." });
@@ -762,7 +782,7 @@ describe("граф чатов", () => {
       .on("GET", `${R}/contents/chats/${CHILD}/messages`, { body: listing(CHILD, ["20261023T110500Z-bob-x1y2.md"]) })
       .on("GET", `${R}/contents/chats/20261023-gone/messages`, { status: 404, body: { message: "Not Found" } })
       .on("GET", /\/contents\/chats\/[^/]+\/decisions/, NOT_FOUND);
-    const res = await getGraph(ctx(fake).gh, REPO);
+    const res = await getGraph(ctx(fake).gh, REPO, testPrivacy);
 
     expect(res.repo).toBe("Alex011082/chat.0110");
     expect(res.chats.map((c) => [c.chat_id, c.state])).toEqual([[CHILD, "closed"], [CHAT, "open"], ["20261023-gone", "open"]]);
@@ -793,7 +813,7 @@ describe("граф чатов", () => {
       .on("GET", R, { body: repoBody() })
       .on("GET", /\/pulls\?state=all&sort=updated/, { body: [chatPr()] })
       .on("GET", `${R}/contents/${DIR}`, { body: [] });
-    const res = await getGraph(ctx(fake).gh, REPO);
+    const res = await getGraph(ctx(fake).gh, REPO, testPrivacy);
     expect(res.chats[0]!.decisions).toEqual([
       { id: D1, title: "Вакуумные руки", status: "superseded", created_at: "2026-10-23T09:00:00.000Z", decided_at: "2026-10-23T09:10:00.000Z" },
       // Принятие агентом статус не меняет (п. 2.3 спеки).
@@ -818,7 +838,7 @@ describe("граф чатов", () => {
         inflight--;
         return { body: [] };
       });
-    const res = await getGraph(ctx(fake).gh, REPO);
+    const res = await getGraph(ctx(fake).gh, REPO, testPrivacy);
     expect(res.chats.length).toBe(10);
     expect(peak).toBe(6);
     expect(fake.find("GET", /\/decisions/).length).toBe(10);
@@ -836,7 +856,7 @@ describe("граф чатов", () => {
           chatPr({ number: i + 1, updated_at: updated(i), head: { ref: `chat/${id(i)}`, sha: "x", repo: { full_name: "Alex011082/chat.0110" } }, body: `<!-- chat0110\nchat_id: ${id(i)}\n-->` })),
       })
       .on("GET", /\/contents\/chats\/[^/]+\/(messages|decisions)/, { body: [] });
-    const res = await getGraph(ctx(fake).gh, REPO);
+    const res = await getGraph(ctx(fake).gh, REPO, testPrivacy);
     expect(res.chats.length).toBe(200);
     expect(res.chats[0]!.chat_id).toBe(id(n - 1));
     expect(res.chats.some((c) => c.chat_id === id(0))).toBe(false);
@@ -902,15 +922,22 @@ describe("принять PR агента", () => {
     return new FakeGitHub()
       .on("GET", `${R}/pulls/9`, { body: pr })
       .on("GET", `${R}/pulls/9/files`, { body: files })
+      .on("GET", /\/contents\/chats\/.+\.md/, { body: { content: b64("Безопасный ответ"), encoding: "base64" } })
       .on("PUT", `${R}/pulls/9/merge`, { body: { sha: "mergesha", merged: true } });
   }
 
   test("только новые файлы-сообщения этого чата — слияние того самого head", async () => {
     const fake = acceptFake([{ filename: `${DIR}/${G}.md`, status: "added", sha: "s" }]);
-    expect(await acceptAgentPr(ctx(fake).gh, REPO, CHAT, 9)).toEqual({ ok: true, merge_sha: "mergesha" });
+    expect(await acceptAgentPr(ctx(fake).gh, REPO, CHAT, 9, testPrivacy)).toEqual({ ok: true, merge_sha: "mergesha" });
     expect(fake.find("PUT", `${R}/pulls/9/merge`)[0]!.body).toEqual({ merge_method: "merge", sha: "agenthead" });
   });
 
+  test("PR агента с секретом не принимается в чат", async () => {
+    const fake = acceptFake([{ filename: `${DIR}/${G}.md`, status: "added", sha: "s" }])
+      .on("GET", /\/contents\/chats\/.+\.md/, { body: { content: b64("password=private-example-value") } });
+    expect((await failure(acceptAgentPr(ctx(fake).gh, REPO, CHAT, 9, testPrivacy))).code).toBe("forbidden");
+    expect(fake.find("PUT", /merge/)).toHaveLength(0);
+  });
   test("в PR есть код или изменение чужого файла — отказ, без слияния", async () => {
     for (const files of [
       [{ filename: `${DIR}/${G}.md`, status: "added", sha: "s" }, { filename: "src/x.ts", status: "added", sha: "s" }],
@@ -919,7 +946,7 @@ describe("принять PR агента", () => {
       [],
     ]) {
       const fake = acceptFake(files);
-      const err = await failure(acceptAgentPr(ctx(fake).gh, REPO, CHAT, 9));
+      const err = await failure(acceptAgentPr(ctx(fake).gh, REPO, CHAT, 9, testPrivacy));
       expect(err.code).toBe("bad_request");
       expect(fake.find("PUT", /merge/).length).toBe(0);
     }
@@ -928,9 +955,9 @@ describe("принять PR агента", () => {
   test("PR не в ветку чата или уже закрыт — отказ", async () => {
     const files = [{ filename: `${DIR}/${G}.md`, status: "added", sha: "s" }];
     const wrongBase = acceptFake(files, pull({ base: { ref: "main" } }));
-    expect((await failure(acceptAgentPr(ctx(wrongBase).gh, REPO, CHAT, 9))).code).toBe("bad_request");
+    expect((await failure(acceptAgentPr(ctx(wrongBase).gh, REPO, CHAT, 9, testPrivacy))).code).toBe("bad_request");
     const closed = acceptFake(files, pull({ state: "closed" }));
-    expect((await failure(acceptAgentPr(ctx(closed).gh, REPO, CHAT, 9))).code).toBe("bad_request");
+    expect((await failure(acceptAgentPr(ctx(closed).gh, REPO, CHAT, 9, testPrivacy))).code).toBe("bad_request");
     expect(wrongBase.find("PUT", /merge/).length + closed.find("PUT", /merge/).length).toBe(0);
   });
 
@@ -938,7 +965,7 @@ describe("принять PR агента", () => {
     let n = 0;
     const fake = acceptFake([{ filename: `${DIR}/${G}.md`, status: "added", sha: "s" }])
       .on("GET", `${R}/pulls/9`, () => ({ body: pull({ head: { sha: ++n === 1 ? "agenthead" : "moved" } }) }));
-    expect((await failure(acceptAgentPr(ctx(fake).gh, REPO, CHAT, 9))).code).toBe("conflict");
+    expect((await failure(acceptAgentPr(ctx(fake).gh, REPO, CHAT, 9, testPrivacy))).code).toBe("conflict");
     expect(fake.find("PUT", /merge/).length).toBe(0);
   });
 });

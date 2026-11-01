@@ -1,3 +1,4 @@
+import { LanguageSwitch } from "../ui/LanguageSwitch.tsx";
 import type { MessageItem, TimelineResponse } from "@chat0110/chat-protocol";
 import { useMemo, type ReactNode } from "react";
 import { ApiFailure, errorText } from "../api.ts";
@@ -44,7 +45,7 @@ interface ChatViewProps {
   focusTick: number;
   onReply: (m: MessageItem) => void;
   onClearReply: () => void;
-  onSend: (text: string, replyTo?: string) => void;
+  onSend: (text: string, replyTo?: string) => void | Promise<boolean>;
   onRetry: (localId: string) => void;
   onAccept: (n: number) => Promise<void>;
   /** Название родителя для дочернего чата (из контекста или списка). */
@@ -115,6 +116,7 @@ export function ChatView(p: ChatViewProps) {
                 </span>
               </span>
             </div>
+            <LanguageSwitch />
             <RoundKey aria-label={s.header.infoKnob} aria-expanded={p.infoOpen} onClick={p.onInfo} />
           </Body>
           {timeline}

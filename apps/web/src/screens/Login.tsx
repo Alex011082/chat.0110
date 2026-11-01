@@ -1,3 +1,4 @@
+import { LanguageSwitch } from "../ui/LanguageSwitch.tsx";
 import type { AppConfig } from "@chat0110/chat-protocol";
 import { s } from "../strings.ts";
 import { ActionKeyLink, Body, Grille, Lamp, Mark, Screen } from "../ui/kit.tsx";
@@ -23,6 +24,8 @@ export function Login({
             {s.markSub}
           </span>
         </div>
+        <LanguageSwitch />
+        <a href="/connect" className="text-cap text-ink-2">{s.locale === "en" ? "Connect your AI" : "Подключить свой ИИ"}</a>
         <Grille width="100%" height={26} />
         <div className="flex flex-col gap-2.5">
           <h1 className="m-0 text-[24px] leading-[1.2] font-semibold tracking-[-0.02em]">{s.login.title}</h1>
@@ -37,7 +40,7 @@ export function Login({
             </div>
           </div>
         ) : null}
-        <ActionKeyLink href="/auth/login" className="min-h-12 px-[22px] text-copy">
+        <ActionKeyLink href={`/auth/login?next=${encodeURIComponent(location.pathname+location.search+location.hash)}`} className="min-h-12 px-[22px] text-copy">
           {s.login.signIn}
         </ActionKeyLink>
         <Screen as="div" className="px-4 py-3.5">

@@ -1,3 +1,5 @@
+import { PrivacyNotice } from "./PrivacyPanel.tsx";
+import {useOnline} from "../lib/pwa.ts";
 import {
   isAgent,
   resolveAuthor,
@@ -78,7 +80,7 @@ export function Timeline(p: TimelineProps) {
     () => [...p.items, ...p.local.flatMap((e) => (e.item ? [e.item] : []))],
     [p.items, p.local],
   );
-  const groups = useMemo(() => groupByDay(blocks, blockTime, p.now), [blocks, p.now]);
+  const groups = useMemo(() => groupByDay(blocks, blockTime, p.now), [blocks, p.now, s.locale]);
   const forks = useMemo(
     () => groupForks(p.forks, known.flatMap((i) => (i.kind === "message" ? [i.id] : []))),
     [p.forks, known],
@@ -263,7 +265,7 @@ function ForkOrigin({
   const titles = new Map(ancestors.map((a) => [a.chat_id, a.title]));
   const groups = useMemo(
     () => groupByDay(inherited?.items ?? [], (m) => m.created_at, now),
-    [inherited, now],
+    [inherited, now, s.locale],
   );
   let lastOrigin: string | undefined;
   return (
@@ -349,6 +351,7 @@ function InheritedMessage({ m, point, origin }: { m: MessageItem; point: boolean
           ) : null}
         </div>
         <Markdown text={m.text} />
+        <PrivacyNotice text={m.text} />
       </div>
     </article>
   );
@@ -479,6 +482,7 @@ function Message({ m, first, published, ctx }: { m: MessageItem; first: boolean;
         </div>
         {reply ? <span className="text-cap text-ink-2">{replyLine(reply)}</span> : null}
         <Markdown text={m.text} />
+        <PrivacyNotice text={m.text} />
         <div className="flex flex-wrap gap-4">
           <TextButton onClick={() => ctx.onReply(m)}>{s.timeline.reply}</TextButton>
           {m.url ? (
@@ -501,6 +505,7 @@ function Message({ m, first, published, ctx }: { m: MessageItem; first: boolean;
 }
 
 function LocalMessage({ entry, first, ctx }: { entry: LocalEntry; first: boolean; ctx: EntryCtx }) {
+  const online=useOnline();
   const reply = entry.reply_to ? resolveReply(ctx.known, entry.reply_to) : null;
   const failed = entry.status === "error";
   return (
@@ -515,7 +520,7 @@ function LocalMessage({ entry, first, ctx }: { entry: LocalEntry; first: boolean
           {failed ? (
             <span className="flex flex-wrap items-center gap-x-1.5 text-cap" role="alert">
               <Lamp state="act" size={8} ring={false} />
-              <TextButton onClick={() => ctx.onRetry(entry.localId)} className="min-h-0 text-action-ink underline">
+              <TextButton disabled={!online} onClick={() => ctx.onRetry(entry.localId)} className="min-h-0 text-action-ink underline">
                 {s.timeline.retrySend}
               </TextButton>
               {entry.error ? <span className="text-ink-2">· {entry.error}</span> : null}

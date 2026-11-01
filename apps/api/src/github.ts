@@ -183,7 +183,8 @@ async function toError(res: Response): Promise<GitHubError> {
     // 405 на слиянии значит «PR нельзя слить» — для пользователя это тот же конфликт.
     : s === 405 || s === 409 || s === 422 ? ["conflict", "GitHub отклонил изменение"]
     : ["github_error", `GitHub ответил ошибкой ${s}`];
-  return new GitHubError(code, message ? `${text} (${message})` : text, s, message);
+  // Сырой ответ нужен только внутренней классификации, в нём бывают значения полей.
+  return new GitHubError(code, text, s, message);
 }
 
 export class GitHubClient {

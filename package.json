@@ -9,7 +9,8 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc -p tsconfig.json --noEmit && bun run --filter @chat0110/web typecheck",
-    "build": "bun run --filter @chat0110/web build",
+    "build": "bun run package:plugins && bun run --filter @chat0110/web build",
+    "package:plugins": "bun scripts/build-plugins.ts",
     "dev:api": "bun --watch apps/api/src/main.ts",
     "dev:web": "bun run --filter '@chat0110/web' dev",
     "chat0110": "bun apps/cli/src/main.ts"
