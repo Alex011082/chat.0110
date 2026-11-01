@@ -143,7 +143,7 @@ export function ChatView(p: ChatViewProps) {
             </h1>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-x-[18px] gap-y-2.5">
-            <Grille width={86} height={36} className={cx("hidden", p.onPropose ? "min-[1440px]:block" : "desk:block")} />
+            <Grille width={86} height={36} className={cx("hidden", p.onPropose ? "min-[1440px]:block" : "desk:block", "short:hidden")} />
             <Key
               onClick={() => forkFrom && p.onFork(forkFrom)}
               disabled={!forkFrom}
@@ -164,9 +164,11 @@ export function ChatView(p: ChatViewProps) {
             ) : null}
           </div>
         </div>
+        {/* На низком окне плашку прячем: ветка и PR есть в «О чате», а высота
+            нужна ленте. */}
         <Screen
           className={cx(
-            "grid gap-3.5 px-[18px] py-3.5",
+            "grid gap-3.5 px-[18px] py-3.5 short:hidden",
             chat.parent ? "grid-cols-2 desk:grid-cols-[minmax(0,1.1fr)_minmax(0,1.3fr)_minmax(0,0.9fr)_minmax(0,1fr)]" : "grid-cols-3",
           )}
         >

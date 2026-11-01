@@ -92,19 +92,24 @@ export function Composer(p: ComposerProps) {
     });
   };
   const checkingHint = sending && text.length > 8000 ? <p role="status" className="m-0 text-cap text-ink-2">{s.locale === "en" ? "Checking a large text locally. This can take up to two minutes." : "Большой текст проверяется локально. Это может занять до двух минут."}</p> : null;
+  const connectLink = (
+    <a
+      href={`/connect?repo=${encodeURIComponent(p.chatKey.split("/").slice(0, 2).join("/"))}&chat=${encodeURIComponent(p.chatKey.split("/")[2] ?? "")}`}
+      target="_blank"
+      rel="noreferrer"
+      className="shrink-0 text-action-ink"
+    >
+      {d.connect} ↗
+    </a>
+  );
+  const helpRow = (
+    <div id="mention-help" className="flex flex-wrap items-center justify-between gap-2 text-cap text-ink-2">
+      <span>{d.help}</span>
+      {connectLink}
+    </div>
+  );
   const routePanel = (
-    <div id="mention-help" className="flex flex-col gap-1.5 text-cap text-ink-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span>{d.help}</span>
-        <a
-          href={`/connect?repo=${encodeURIComponent(p.chatKey.split("/").slice(0, 2).join("/"))}&chat=${encodeURIComponent(p.chatKey.split("/")[2] ?? "")}`}
-          target="_blank"
-          rel="noreferrer"
-          className="text-action-ink"
-        >
-          {d.connect} ↗
-        </a>
-      </div>
+    <div className="flex flex-col gap-1.5 text-cap text-ink-2 empty:hidden">
       {options.length > 0 ? (
         <div
           id="mention-options"
@@ -190,13 +195,17 @@ export function Composer(p: ComposerProps) {
     area.current?.focus();
   }, [p.focusTick]);
 
-  // На телефоне поле растёт вместе с текстом, но не выше 160px.
+  // Поле в одну строку и растёт вместе с текстом, но не выше 160px и не выше
+  // пятой части окна (потолок в классе поля). Раньше
+  // на компьютере оно было в три строки, и на низком окне (ноутбук с Windows
+  // и масштабом 125–150%) блок ввода вместе с шапкой съедал всю высоту —
+  // от ленты оставалась полоска в несколько миллиметров.
   useLayoutEffect(() => {
     const el = area.current;
-    if (!el || !p.phone) return;
+    if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-  }, [text, p.phone]);
+  }, [text]);
 
   const update = (value: string) => {
     setText(value);
@@ -246,7 +255,7 @@ export function Composer(p: ComposerProps) {
       <span className="sr-only-text">{s.composer.label}</span>
       <textarea
         ref={area}
-        rows={p.phone ? 1 : 3}
+        rows={1}
         value={text}
         disabled={!p.canPush || sending}
         placeholder={s.composer.placeholder}
@@ -259,7 +268,7 @@ export function Composer(p: ComposerProps) {
         aria-describedby="mention-help"
         aria-controls={options.length ? "mention-options" : undefined}
         onKeyDown={onKeyDown}
-        className={cx(SLOT, "resize-none py-3 text-copy", p.phone ? "py-[11px]" : "short:h-[68px]")}
+        className={cx(SLOT, "max-h-[min(160px,20svh)] resize-none overflow-y-auto py-[11px] text-copy")}
       />
     </label>
   );
@@ -276,6 +285,7 @@ export function Composer(p: ComposerProps) {
         className="flex shrink-0 flex-col gap-2 border-t border-line bg-rail px-3.5 pt-3.5 pb-[max(18px,env(safe-area-inset-bottom))]"
       >
         {replyChip}
+        {helpRow}
         {routePanel}
         {checkingHint}
         <PrivacyPanel chatKey={p.chatKey} text={text} onApply={update} />
@@ -288,22 +298,24 @@ export function Composer(p: ComposerProps) {
     );
   }
 
+  // На компьютере три плотных ряда: служебное (только когда есть), поле с
+  // кнопкой, одна строка подсказок. Лента выше должна оставаться главной.
   return (
-    <Body
-      as="form"
-      onSubmit={onSubmit}
-      className="flex shrink-0 flex-col gap-3 px-4 pt-4 pb-6 short:gap-2.5 short:pt-3 short:pb-5"
-    >
+    <Body as="form" onSubmit={onSubmit} className="flex shrink-0 flex-col gap-2 px-4 pt-3 pb-3">
       {replyChip}
       {routePanel}
       {checkingHint}
-      {field}
-      <PrivacyPanel chatKey={p.chatKey} text={text} onApply={update} />
-      <div className="flex flex-wrap items-center justify-between gap-2.5">
-        <span className="px-1 text-cap text-ink-2">{p.canPush ? s.composer.hint(p.branch) : s.composer.readOnly}</span>
+      <div className="flex items-end gap-2.5">
+        {field}
         <ActionKey type="submit" disabled={!p.canPush || !online || !!routingError || sending}>
           {sending ? (s.locale === "en" ? "Checking…" : "Проверяем…") : s.composer.send}
         </ActionKey>
+      </div>
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-1 px-1 text-cap text-ink-2">
+        <span id="mention-help">{d.help}</span>
+        {connectLink}
+        <span className="min-w-0 flex-1 truncate">{p.canPush ? s.composer.hint(p.branch) : s.composer.readOnly}</span>
+        <PrivacyPanel chatKey={p.chatKey} text={text} onApply={update} compact />
       </div>
     </Body>
   );
