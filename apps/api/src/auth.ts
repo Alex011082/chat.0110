@@ -100,11 +100,7 @@ export function createAuth(deps: AuthDeps) {
         const user = await new GitHubClient({ token: tokens.access_token, userId: 0, fetch: fetcher }).getUser();
         if (!isLoginAllowed(config, user.login)) {
           return withCookies(
-            htmlPage(
-              403,
-              "Вход пока закрыт",
-              `Идёт закрытая бета: вход для ${user.login} ещё не открыт. Напишите владельцу chat.0110, чтобы вас добавили.`,
-            ),
+            htmlPage(403, "Вход закрыт", `Владелец chat.0110 закрыл вход для ${user.login}. Если это ошибка — напишите ему.`),
             clear,
           );
         }

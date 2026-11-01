@@ -42,7 +42,7 @@ export const s: Dictionary = {
     install: "Install the app on a repository",
     forbiddenTitle: "Access denied",
     forbidden:
-      "This GitHub account cannot sign in during the private beta. Contact the owner of chat.0110 or use another account.",
+      "The owner of chat.0110 has blocked sign-in for this GitHub account. If this is a mistake, contact them or use another account.",
     serverDown: "The server is not responding. Try again in a minute.",
   },
   rail: { label: "Sections", chats: "Chats", newChat: "New", tree: "Tree", soon: "Soon", logout: "Sign out" },

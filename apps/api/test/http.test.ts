@@ -28,7 +28,7 @@ afterAll(() => rmSync(dist, { recursive: true, force: true }));
 
 const repoBody = { full_name: "Alex011082/chat.0110", name: "chat.0110", owner: { login: "Alex011082" }, private: false, default_branch: "main", permissions: { push: true } };
 
-async function setup(opts: { allowed?: string; webDist?: string; privacy?: Privacy } = {}) {
+async function setup(opts: { blocked?: string; webDist?: string; privacy?: Privacy } = {}) {
   const config = loadConfig({
     CHAT0110_PUBLIC_URL: PUBLIC,
     GITHUB_APP_CLIENT_ID: "cid",
@@ -37,7 +37,7 @@ async function setup(opts: { allowed?: string; webDist?: string; privacy?: Priva
     GITHUB_WEBHOOK_SECRET: "wh",
     CHAT0110_COOKIE_KEY: "c".repeat(64),
     CHAT0110_WEB_DIST: opts.webDist ?? dist,
-    ...(opts.allowed ? { CHAT0110_ALLOWED_LOGINS: opts.allowed } : {}),
+    ...(opts.blocked ? { CHAT0110_BLOCKED_LOGINS: opts.blocked } : {}),
   });
   const fake = new FakeGitHub()
     .on("GET", "/user", { body: { login: "Alex011082", id: 7, name: "Alex", avatar_url: "https://avatars.githubusercontent.com/u/7" } })
@@ -152,8 +152,8 @@ describe("маршруты", () => {
     expect(fake.calls[0]!.headers.get("authorization")).toBe("Bearer ghu_x");
   });
 
-  test("логин убрали из списка — сессия больше не работает", async () => {
-    const { app, cookie } = await setup({ allowed: "someone" });
+  test("вход закрыли после входа — сессия больше не работает", async () => {
+    const { app, cookie } = await setup({ blocked: "alex011082" });
     const res = await app(get("/api/me", cookie));
     expect(res.status).toBe(403);
   });

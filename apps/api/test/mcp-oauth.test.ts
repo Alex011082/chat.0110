@@ -183,7 +183,7 @@ test("GitHub credentials зашифрованы, OAuth credentials лежат т
   expect(dump).toContain("v1.");
 });
 
-test("connection обновляет GitHub сессию и переживает перезапуск, allowlist применяется заново", async () => {
+test("connection обновляет GitHub сессию и переживает перезапуск, блок-лист применяется заново", async () => {
   const f = await setup(); await f.grant();
   f.fake.on("POST", "/login/oauth/access_token", { body: { access_token: "ghu_fresh", expires_in: 28800, refresh_token: "ghr_fresh", refresh_token_expires_in: 15897600 } });
   f.clock.now += 8 * 3600_000 - 60_000;
@@ -192,7 +192,7 @@ test("connection обновляет GitHub сессию и переживает 
   const restarted = new McpOAuth({ db: f.db, key: f.key, publicUrl: ROOT, sessions: f.sessions, config: f.config, now: () => f.clock.now });
   expect((await restarted.connection("chatgpt:7"))?.session.rt).toBe("ghr_fresh");
   expect(f.fake.calls.length).toBe(1);
-  f.config.allowedLogins = new Set(["another"]);
+  f.config.blockedLogins = new Set(["alex011082"]);
   expect(await f.oauth.connection("chatgpt:7")).toBeNull();
 });
 

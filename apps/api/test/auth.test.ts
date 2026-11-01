@@ -6,7 +6,7 @@ import { FakeGitHub } from "./fake-github.ts";
 
 const PUBLIC = "https://chat.0110.digital";
 
-async function setup(over: Record<string, string> = {}) {
+async function setup(over: Record<string, string> = {}, login = "Alex011082") {
   const config = loadConfig({
     CHAT0110_PUBLIC_URL: PUBLIC,
     GITHUB_APP_CLIENT_ID: "Iv1.cid",
@@ -18,7 +18,7 @@ async function setup(over: Record<string, string> = {}) {
   });
   const fake = new FakeGitHub()
     .on("POST", "/login/oauth/access_token", { body: { access_token: "ghu_x", expires_in: 28800, refresh_token: "ghr_x", refresh_token_expires_in: 15897600 } })
-    .on("GET", "/user", { body: { login: "Alex011082", id: 7, name: "Alex", avatar_url: "a" } });
+    .on("GET", "/user", { body: { login, id: 7, name: "Alex", avatar_url: "a" } });
   const sessions = new SessionStore({ key: await importCookieKey(config.cookieKey), dev: false, clientId: config.clientId, clientSecret: config.clientSecret, fetch: fake.fetch });
   const auth = createAuth({ config, sessions, fetch: fake.fetch });
   return { auth, fake, sessions };
@@ -79,12 +79,29 @@ describe("вход через GitHub", () => {
     expect(fake.calls.length).toBe(0);
   });
 
-  test("логина нет в списке — 403 по-русски, сессии нет", async () => {
-    const { auth } = await setup({ CHAT0110_ALLOWED_LOGINS: "someone" });
+  // Главное обещание: новый человек входит сам, без того чтобы владелец
+  // вписывал его логин. Второй случай — сервер, где в env осталась старая
+  // переменная белого списка.
+  for (const [name, over] of [
+    ["без настроек", {}],
+    ["со старым белым списком в env", { CHAT0110_ALLOWED_LOGINS: "Alex011082" }],
+  ] as const) {
+    test(`новый логин входит сам (${name}) — сессия и редирект на /`, async () => {
+      const { auth } = await setup(over, "SomeNewcomer");
+      const { state, cookie } = await startLogin(auth);
+      const res = await auth.callback(new Request(`${PUBLIC}/auth/callback?code=abc&state=${state}`, { headers: { cookie } }));
+      expect(res.status).toBe(302);
+      expect(res.headers.get("location")).toBe("/");
+      expect(setCookies(res).some((c) => c.startsWith("__Host-chat0110=v1."))).toBe(true);
+    });
+  }
+
+  test("логин закрыт владельцем — 403 по-русски, сессии нет", async () => {
+    const { auth } = await setup({ CHAT0110_BLOCKED_LOGINS: "spammer" }, "Spammer");
     const { state, cookie } = await startLogin(auth);
     const res = await auth.callback(new Request(`${PUBLIC}/auth/callback?code=abc&state=${state}`, { headers: { cookie } }));
     expect(res.status).toBe(403);
-    expect(await res.text()).toContain("Alex011082");
+    expect(await res.text()).toContain("Spammer");
     expect(setCookies(res).some((c) => c.startsWith("__Host-chat0110=v1."))).toBe(false);
   });
 
