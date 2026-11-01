@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { loadConfig } from "../src/config.ts";
+import { isLoginAllowed, loadConfig } from "../src/config.ts";
 
 const KEY = "a".repeat(64);
 
@@ -24,7 +24,7 @@ describe("конфигурация", () => {
     expect(c.publicOrigin).toBe("https://chat.0110.digital");
     expect(c.devCookies).toBe(false);
     expect(c.cookieKey.length).toBe(32);
-    expect(c.allowedLogins).toEqual(new Set(["alex011082"]));
+    expect(c.blockedLogins).toEqual(new Set());
     expect(c.webDist).toBe(resolve(import.meta.dir, "../../web/dist"));
     expect(c.appSlug).toBe("chat0110");
   });
@@ -33,22 +33,29 @@ describe("конфигурация", () => {
     const c = loadConfig(env({
       CHAT0110_PORT: "5000",
       CHAT0110_PUBLIC_URL: "http://localhost:4340/",
-      CHAT0110_ALLOWED_LOGINS: " Alex011082, Bob ,,",
+      CHAT0110_BLOCKED_LOGINS: " Spammer, Bob ,,",
       CHAT0110_WEB_DIST: "/srv/web",
     }));
     expect(c.port).toBe(5000);
     expect(c.publicUrl).toBe("http://localhost:4340");
     expect(c.devCookies).toBe(true);
-    expect(c.allowedLogins).toEqual(new Set(["alex011082", "bob"]));
+    expect(c.blockedLogins).toEqual(new Set(["spammer", "bob"]));
     expect(c.webDist).toBe("/srv/web");
   });
 
-  test("пустой список логинов — значение по умолчанию, а не «никого»", () => {
-    expect(loadConfig(env({ CHAT0110_ALLOWED_LOGINS: " " })).allowedLogins).toEqual(new Set(["alex011082"]));
+  test("вход открыт любому новому логину без списка", () => {
+    expect(isLoginAllowed(loadConfig(env()), "SomeNewcomer")).toBe(true);
   });
 
-  test("звёздочка открывает вход всем", () => {
-    expect(loadConfig(env({ CHAT0110_ALLOWED_LOGINS: "*" })).allowedLogins).toBe("*");
+  test("старый белый список на сервере не закрывает вход новичку", () => {
+    const c = loadConfig(env({ CHAT0110_ALLOWED_LOGINS: "Alex011082" }));
+    expect(isLoginAllowed(c, "SomeNewcomer")).toBe(true);
+  });
+
+  test("закрытый владельцем логин не входит, регистр не важен", () => {
+    const c = loadConfig(env({ CHAT0110_BLOCKED_LOGINS: "Spammer" }));
+    expect(isLoginAllowed(c, "spammer")).toBe(false);
+    expect(isLoginAllowed(c, "Alex011082")).toBe(true);
   });
 
   test("нет секретов — одна понятная ошибка со всеми именами", () => {

@@ -13,13 +13,18 @@ NEW_WEBHOOK=0
 [ "${1:-}" = "--new-webhook-secret" ] && NEW_WEBHOOK=1
 
 # Client ID и slug не секретны и известны — спрашиваем только секрет.
-# Другое приложение или список входа: задать переменными перед запуском.
+# Другое приложение или закрыть вход отдельным логинам: задать переменными перед запуском.
 CLIENT_ID=${GITHUB_APP_CLIENT_ID:-Iv23liSMB8B7r7rseue4}
 SLUG=${GITHUB_APP_SLUG:-chat-0110}
-ALLOWED=${CHAT0110_ALLOWED_LOGINS:-Alex011082}
+# Вход открыт всем; сюда — только логины, которым его закрыли (через запятую).
+BLOCKED=${CHAT0110_BLOCKED_LOGINS:-}
 read -r -s -p "Client secret приложения $SLUG (ввод не виден): " CLIENT_SECRET; echo
 
-for v in "$CLIENT_ID" "$CLIENT_SECRET" "$SLUG" "$ALLOWED"; do
+if [[ "$BLOCKED" =~ [[:space:]\"\'\\\$\`] ]]; then
+  echo "Недопустимые символы в CHAT0110_BLOCKED_LOGINS." >&2
+  exit 1
+fi
+for v in "$CLIENT_ID" "$CLIENT_SECRET" "$SLUG"; do
   if [ -z "$v" ] || [[ "$v" =~ [[:space:]\"\'\\\$\`] ]]; then
     echo "Пустое значение или недопустимые символы (пробелы, кавычки, \$, \\, \`)." >&2
     exit 1
@@ -59,7 +64,7 @@ RESULT=$(printf '%s\n' \
   "GITHUB_APP_CLIENT_ID=$CLIENT_ID" \
   "GITHUB_APP_CLIENT_SECRET=$CLIENT_SECRET" \
   "GITHUB_APP_SLUG=$SLUG" \
-  "CHAT0110_ALLOWED_LOGINS=$ALLOWED" |
+  "CHAT0110_BLOCKED_LOGINS=$BLOCKED" |
   ssh "$SERVER" "NEW_WEBHOOK=$NEW_WEBHOOK bash -c \"\$(echo $B64 | base64 -d)\"")
 
 echo "Секреты записаны в /etc/chat0110/chat0110.env, сервис перезапущен."
