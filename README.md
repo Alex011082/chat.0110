@@ -51,8 +51,8 @@ bun run dev:web   # интерфейс на Vite, /api и /auth проксиру
    - После создания: Generate a new client secret; Install App → на `chat.0110`
 3. `bash deploy/setup.sh` — каталоги, systemd-unit и сайт Caddy на сервере.
 4. `bash deploy/configure.sh` — ввести Client secret (Client ID и slug `chat-0110`
-   уже вписаны; список входа — `CHAT0110_ALLOWED_LOGINS=логин1,логин2` перед
-   командой). Скрипт покажет секрет вебхука — вставить его в настройки App.
+   уже вписаны). Вход открыт любому аккаунту GitHub; закрыть его отдельным
+   логинам — `CHAT0110_BLOCKED_LOGINS=логин1,логин2` перед командой. Скрипт покажет секрет вебхука — вставить его в настройки App.
 5. `bash deploy/deploy.sh` — выкат закоммиченного состояния; повторять при каждом
    обновлении.
 

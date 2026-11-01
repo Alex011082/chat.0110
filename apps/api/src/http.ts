@@ -128,7 +128,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
   async function requireSession(req: Request): Promise<{ session: SessionData; setCookie?: string }> {
     const got = await sessions.read(req);
     if (!got) throw unauthorized();
-    // Список логинов могли сократить после входа: cookie живёт месяцами.
+    // Вход могли закрыть уже после входа: cookie живёт месяцами.
     if (!isLoginAllowed(config, got.session.login)) throw forbidden(`Вход для ${got.session.login} закрыт`);
     return got;
   }

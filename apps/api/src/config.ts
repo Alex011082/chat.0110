@@ -14,7 +14,9 @@ export interface Config {
   appSlug: string;
   webhookSecret: string;
   cookieKey: Uint8Array;
-  allowedLogins: Set<string> | "*";
+  // Вход открыт любому аккаунту GitHub; здесь — только те, кому владелец
+  // закрыл вход (злоупотребления). Пусто — закрытых нет.
+  blockedLogins: Set<string>;
   webDist: string;
 }
 
@@ -76,12 +78,16 @@ export function loadConfig(env: Env): Config {
 
   if (problems.length) throw new Error(`Конфигурация chat.0110 неполная: ${problems.join("; ")}`);
 
-  // Пустая строка (например, пустая строка в env-файле) — тоже «по умолчанию»,
-  // а не «никого»: иначе владелец запер бы сам себя.
-  const allowedRaw = env.CHAT0110_ALLOWED_LOGINS?.trim() || "Alex011082";
-  const allowedLogins = allowedRaw.trim() === "*"
-    ? "*"
-    : new Set(allowedRaw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean));
+  // Белого списка больше нет: с ним новый человек не мог войти сам, пока
+  // владелец не впишет его руками. Старую переменную не читаем, а громко
+  // замечаем — иначе на сервере, где она осталась, вход молча открылся бы
+  // не так, как ждёт тот, кто её туда записал.
+  if (env.CHAT0110_ALLOWED_LOGINS?.trim()) {
+    console.warn("CHAT0110_ALLOWED_LOGINS больше не действует: вход открыт всем. Закрыть вход отдельным логинам — CHAT0110_BLOCKED_LOGINS.");
+  }
+  const blockedLogins = new Set(
+    (env.CHAT0110_BLOCKED_LOGINS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+  );
 
   return {
     port,
@@ -93,11 +99,11 @@ export function loadConfig(env: Env): Config {
     appSlug: get("GITHUB_APP_SLUG"),
     webhookSecret: get("GITHUB_WEBHOOK_SECRET"),
     cookieKey,
-    allowedLogins,
+    blockedLogins,
     webDist: get("CHAT0110_WEB_DIST") || resolve(import.meta.dir, "../../web/dist"),
   };
 }
 
-export function isLoginAllowed(config: Pick<Config, "allowedLogins">, login: string): boolean {
-  return config.allowedLogins === "*" || config.allowedLogins.has(login.toLowerCase());
+export function isLoginAllowed(config: Pick<Config, "blockedLogins">, login: string): boolean {
+  return !config.blockedLogins.has(login.toLowerCase());
 }
