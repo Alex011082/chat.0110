@@ -80,11 +80,13 @@ export function ParticipantAutoReplies({
                 {deliveryState === "working"
                   ? en ? "Answering" : "Отвечает"
                   : deliveryState === "waiting"
-                  ? en
+                  ? chatgpt ? en ? "Event subscription active · waiting for a turn" : "Подписка активна · ждём вызов" : en
                     ? "Listening for addressed turns"
                     : "Ожидает адресованные сообщения"
                   : session.auto_enabled
-                    ? chatgpt
+                    ? chatgpt && view.chatgpt?.last_error
+                      ? en ? "Event delivery failed · retrying" : "Ошибка доставки событий · повторяем"
+                    : chatgpt
                       ? en
                         ? "Waiting for the ChatGPT subscription"
                         : "Ожидаем подписку ChatGPT"

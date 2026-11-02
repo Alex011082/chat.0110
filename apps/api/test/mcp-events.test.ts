@@ -24,6 +24,18 @@ async function fixture() {
 }
 
 describe("устойчивые подписки MCP Events", () => {
+  test("ошибка callback не выдаётся за рабочую связь; подписка остаётся для повтора", async () => {
+    const f = await fixture();
+    await f.events.subscribe("c", 42, params);
+    await f.events.deliver("c", event); f.setStatus(503);
+    await f.events.flush(async () => true);
+    expect(f.events.hasActive("c")).toBe(true);
+    expect(f.events.status("c")).toEqual({ connected: false, last_error: "Callback: HTTP 503" });
+    f.advance(2000); f.setStatus(202);
+    await f.events.flush(async () => true);
+    expect(f.events.status("c")).toEqual({ connected: true, last_error: null });
+    f.db.close();
+  });
   test("пауза удерживает pending без попыток и после перезапуска доставляет ровно один раз", async () => {
     const f = await fixture();
     await f.events.subscribe("c", 42, params);
@@ -198,7 +210,8 @@ describe("устойчивые подписки MCP Events", () => {
       await f.events.deliver("c", { ...event, eventId: "event-2" });
       f.setStatus(status);
       await f.events.flush(async () => true);
-      expect(f.events.status("c").connected).toBe(status !== 410);
+      expect(f.events.hasActive("c")).toBe(status !== 410);
+      expect(f.events.status("c").connected).toBe(false);
       expect(f.events.status("c").last_error).toBe(`Callback: HTTP ${status}`);
       expect(f.delivered).toHaveLength(status === 410 ? 1 : 2);
     }

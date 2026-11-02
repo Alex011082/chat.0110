@@ -443,7 +443,7 @@ test("адресное сообщение проходит Claude → Codex → 
       return {status:201,body:{commit:{sha:"commit",html_url:"https://github.com/c/commit"}}};
     });
   const agent=async(method:string,body:unknown)=>{
-    const response=await app(new Request(`${PUBLIC}/api/agent/${method}`,{method:"POST",headers:{authorization:"Bearer test-user-token","content-type":"application/json"},body:JSON.stringify(body)}));
+    const response=await app(new Request(`${PUBLIC}/api/agent/${method}`,{method:"POST",headers:{authorization:"Bearer ghu_fixture-user-token","content-type":"application/json"},body:JSON.stringify(body)}));
     const result=await response.json();
     expect(response.status).toBe(200);
     return result;

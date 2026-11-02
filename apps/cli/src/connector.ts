@@ -7,6 +7,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
+import { McpCredentials } from "./mcp-auth.ts";
 
 const base = new URL(process.env.CHAT0110_URL ?? "https://chat.0110.digital");
 if (base.username||base.password||!(base.origin==="https://chat.0110.digital"||(base.protocol === "http:" && ["localhost", "127.0.0.1"].includes(base.hostname))))
@@ -17,6 +19,7 @@ let probe="";
 const shutdown=new AbortController();
 let state: ConnectorState | null = null;
 let token = "";
+const credentials = process.env.CHAT0110_AUTH_FILE ? new McpCredentials(process.env.CHAT0110_AUTH_FILE, base.origin) : null;
 let session: string | null = null;
 let current: PendingTurn | null = null;
 function save() {
@@ -29,18 +32,21 @@ function save() {
 let pulling = false;
 let closed = false;
 async function call(method: string, body: Record<string, unknown>): Promise<any> {
-  if (!token) {
+  if (credentials) token = await credentials.token();
+  else if (!token) {
     const got = spawnSync("gh", ["auth", "token"], { encoding: "utf8" });
     if (got.status !== 0 || !got.stdout.trim()) throw new Error("Run gh auth login before connecting chat0110.");
     token = got.stdout.trim();
   }
-  const response = await fetch(new URL(`/api/agent/${method}`, base), {
+  const send = () => fetch(new URL(`/api/agent/${method}`, base), {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(credentials ? { "X-Chat0110-Auth": "oauth" } : {}) },
     body: JSON.stringify({ ...body, session_id: session ?? state?.value.external }),
     signal: AbortSignal.any([shutdown.signal,AbortSignal.timeout(40_000)]),
     redirect: "error",
   });
+  let response = await send();
+  if (response.status === 401 && credentials) { token = await credentials.token(token); response = await send(); }
   if (!response.ok) {
     if (response.status === 401) token = "";
     const error = await response.json().catch(() => ({}));
@@ -226,6 +232,6 @@ if (channel)
       } catch {
         /* Сетевой сбой не разрешает повторное выполнение уже взятого хода. */
       }
-      await Bun.sleep(1000);
+      await delay(1000);
     }
   })();

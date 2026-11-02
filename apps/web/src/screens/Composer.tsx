@@ -1,5 +1,5 @@
 import { PrivacyPanel } from "./PrivacyPanel.tsx";
-import { mentionRoute, resolveMention, suggestMentions, type DispatchView } from "@chat0110/chat-protocol";
+import { canonicalMention, mentionRoute, resolveMention, suggestMentions, type DispatchView } from "@chat0110/chat-protocol";
 import { dispatchRequest, dispatchText } from "../dispatch.ts";
 import type { MessageItem } from "@chat0110/chat-protocol";
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
@@ -130,7 +130,7 @@ export function Composer(p: ComposerProps) {
               <span>
                 @{session.alias} · {session.name}
               </span>
-              <span>{session.online ? d.online : d.offline}</span>
+              <span>{session.online ? canonicalMention(session.author) === "chatgpt" ? s.locale === "en" ? "subscription active" : "подписка активна" : d.online : d.offline}</span>
             </button>
           ))}
         </div>
