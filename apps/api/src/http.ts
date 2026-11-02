@@ -425,7 +425,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
       const info = await requireOpenChat(gh, repo, body.chat_id);
       return json(
         200,
-        {version:"2.1.0",...dispatch.register(
+        {version:"2.1.0",capabilities:{idempotent_next:true},...dispatch.register(
           user.id,
           info.full_name,
           body.chat_id,
@@ -451,6 +451,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
       return json(200,{version:"2.1.0",session:dispatch.list(user.id,session.repo,session.chat).sessions.find(s=>s.id===session.id),requires_live_client:true});
     }
     if (path === "/api/agent/next") {
+      if(body.request_id!==undefined&&(typeof body.request_id!=="string"||!/^[a-zA-Z0-9_-]{1,100}$/.test(body.request_id)))throw badRequest("Неверный request_id");
       const pull = await gh.findChatPull(repo, session.chat);
       if (!pull || pull.state !== "open") throw new HttpError(409, "conflict", "Чат закрыт");
       const until = Date.now() + (body.wait === true ? 25_000 : 0);
@@ -459,7 +460,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
       req.signal.addEventListener("abort", stopWaiting, { once: true });
       try {
         do {
-          task = dispatch.claim(session.id);
+          task = typeof body.request_id==="string" ? dispatch.claimRequest(session.id,body.request_id) : dispatch.claim(session.id);
           if (task || Date.now() >= until || req.signal.aborted) break;
           await Bun.sleep(500);
         } while (true);

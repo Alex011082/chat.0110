@@ -61,6 +61,7 @@ export class DispatchStore {
       this.db.exec("ALTER TABLE sessions ADD COLUMN auto_generation INTEGER NOT NULL DEFAULT 0");
     // Отдельная таблица сохраняет совместимость старого INSERT INTO chains VALUES при откате.
     this.db.exec("CREATE TABLE IF NOT EXISTS chain_limits (chain_id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)");
+    this.db.exec("CREATE TABLE IF NOT EXISTS agent_pulls (session_id TEXT NOT NULL, request_id TEXT NOT NULL, task_id TEXT NOT NULL, PRIMARY KEY(session_id,request_id))");
     this.db.query("INSERT OR IGNORE INTO chain_limits SELECT id,? FROM chains").run(Date.now() + 15 * 60_000);
     if (!this.db.query<{ name: string }, []>("PRAGMA table_info(tasks)").all().some(column => column.name === "outcome"))
       this.db.exec("ALTER TABLE tasks ADD COLUMN outcome TEXT");
@@ -298,6 +299,21 @@ export class DispatchStore {
       )
       .run(stale);
     this.db.query("UPDATE tasks SET status='interrupted' WHERE status='running' AND started < ?").run(stale);
+  }
+  /** Потерянный HTTP-ответ не должен навсегда потерять уже выданный claim. */
+  claimRequest(sessionId: string, requestId: string): Task | null {
+    if (!/^[a-zA-Z0-9_-]{1,100}$/.test(requestId)) throw badRequest("Неверный request_id");
+    return this.db.transaction(() => {
+      this.expire();
+      const old=this.db.query<{task_id:string},[string,string]>("SELECT task_id FROM agent_pulls WHERE session_id=? AND request_id=?").get(sessionId,requestId);
+      if(old){
+        const t=this.db.query<Task,[string,string]>("SELECT t.* FROM tasks t JOIN sessions s ON s.id=t.session_id WHERE t.id=? AND t.session_id=? AND s.auto_enabled=1 AND t.status IN ('running','interrupted')").get(old.task_id,sessionId);
+        return t ?? null;
+      }
+      const task=this.claim(sessionId);
+      if(task)this.db.query("INSERT INTO agent_pulls VALUES (?,?,?)").run(sessionId,requestId,task.id);
+      return task;
+    }).immediate();
   }
   claim(sessionId: string, expectedId?: string): Task | null {
     return this.db.transaction(() => {

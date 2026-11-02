@@ -12,7 +12,7 @@ export class NativeDelivery {
       attempts INTEGER NOT NULL DEFAULT 0
     )`);
   }
-  send(id: string, target: string, text: string): Promise<NativeReceipt> {
+  send(id: string, target: string, text: string, signal?:AbortSignal,admit?:()=>Promise<boolean>): Promise<NativeReceipt> {
     if (!/^[\x21-\x7e]{1,200}$/.test(id) || !target || !text.trim() || text.length > 60_000)
       throw new Error("Неверное задание доставки");
     const fingerprint = createHash("sha256").update(JSON.stringify([target, text])).digest("hex");
@@ -23,17 +23,20 @@ export class NativeDelivery {
       // После сбоя между записью и отправкой нельзя знать, получил ли клиент сообщение.
       if (row.state === "sending") this.db.query("UPDATE native_delivery SET state='uncertain' WHERE id=? AND state='sending'").run(id);
     }).immediate();
-    return this.run(id, text);
+    return this.run(id, text, signal,admit);
   }
   cancel(id: string) { this.db.query("UPDATE native_delivery SET state='cancelled' WHERE id=? AND state!='acknowledged'").run(id); }
   acknowledge(id: string) { this.db.query("UPDATE native_delivery SET state='acknowledged' WHERE id=? AND state IN ('sent_unconfirmed','uncertain')").run(id); }
   private receipt(id: string): NativeReceipt {
     return this.db.query<NativeReceipt, [string]>("SELECT state,attempts FROM native_delivery WHERE id=?").get(id)!;
   }
-  private async run(id: string, text: string): Promise<NativeReceipt> {
+  private async run(id: string, text: string, signal?:AbortSignal,admit?:()=>Promise<boolean>): Promise<NativeReceipt> {
     while (true) {
       const row = this.receipt(id);
+      if(signal?.aborted)return row;
       if (row.state !== "queued") return row;
+      if(admit&&!await admit()){this.cancel(id);return this.receipt(id);}
+      if(signal?.aborted)return this.receipt(id);
       if (row.attempts >= 3) {
         this.db.query("UPDATE native_delivery SET state='failed' WHERE id=?").run(id);
         return this.receipt(id);
