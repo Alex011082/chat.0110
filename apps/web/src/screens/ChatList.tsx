@@ -17,6 +17,7 @@ interface ChatListProps {
   selected: string | null;
   onOpen: (chat: ChatSummary) => void;
   onNew: () => void;
+  canCreate: boolean;
   activation: ChatActivation | null;
   activating: boolean;
   onActivate: () => void;
@@ -60,6 +61,10 @@ export function ChatList(p: ChatListProps) {
           ))}
         </select>
       </label>
+
+      <Key onClick={p.onNew} disabled={!p.canCreate} className="w-full">
+        {s.newChat.title}
+      </Key>
 
       <Activation
         activation={p.activation}

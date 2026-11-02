@@ -30,7 +30,7 @@ export function PrivacyPanel({ chatKey, text, onApply, compact = false }: { chat
   };
   const shown = result?.version === current.current.version ? result.value : null;
   return (
-    <details className={compact ? "text-cap text-ink-2 open:basis-full" : "border-t border-line pt-2 text-cap text-ink-2"}>
+    <details className={compact ? "min-w-0 max-w-full text-cap text-ink-2 open:basis-full" : "border-t border-line pt-2 text-cap text-ink-2"}>
       <summary className={compact ? "cursor-pointer" : "min-h-9 cursor-pointer py-2"}>{en ? "Data protection · on" : "Защита данных · включена"}</summary>
       <div className="flex max-h-[min(24svh,200px)] flex-col gap-3 overflow-y-auto overscroll-contain py-2 pr-1">
         <p className="m-0">{en ? "Secrets, emails, phones, documents, bank details, names and addresses are replaced before publication and delivery to AI. Originals are not saved." : "Ключи, пароли, email, телефоны, документы, реквизиты, имена и адреса заменяются до публикации и передачи ИИ. Оригиналы не сохраняются."}</p>

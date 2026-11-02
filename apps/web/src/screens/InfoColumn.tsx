@@ -33,7 +33,7 @@ interface InfoProps {
   store?: 1 | 2;
 }
 
-/** Правая колонка: участники, решения, ветвления, ссылка для агента, паспорт чата. */
+/** Правая колонка: участники, ссылка для агента, решения, ветвления, паспорт чата. */
 export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, decisions, outgoing, onJump, onPropose, store }: InfoProps) {
   const counts = useMemo(() => countTimeline(items), [items]);
   const owner = chat.created_by.toLowerCase();
@@ -100,14 +100,6 @@ export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, de
         {autoError ? <p role="status" className="m-0 text-cap text-ink-2">{s.locale === "en" ? "Connection status unavailable. Retrying…" : "Не удалось проверить сессии. Повторяем…"}</p> : null}
       </Plate>
 
-      <Decisions chat={chat} decisions={decisions} now={now} onJump={onJump} />
-
-      {chat.parent ? (
-        <Proposals chat={chat} outgoing={outgoing} parentTitle={parentTitle} now={now} onPropose={onPropose} />
-      ) : null}
-
-      <Branches chat={chat} items={items} forks={forks} inherited={inherited} parentTitle={parentTitle} />
-
       <Body className="flex flex-col gap-3.5 px-[18px] pt-[18px] pb-[26px]">
         <div className="flex items-center justify-between gap-2.5">
           <h2 className="m-0 text-section font-semibold tracking-[-0.01em]">{s.info.agentLink}</h2>
@@ -126,6 +118,14 @@ export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, de
           </span>
         </div>
       </Body>
+
+      <Decisions chat={chat} decisions={decisions} now={now} onJump={onJump} />
+
+      {chat.parent ? (
+        <Proposals chat={chat} outgoing={outgoing} parentTitle={parentTitle} now={now} onPropose={onPropose} />
+      ) : null}
+
+      <Branches chat={chat} items={items} forks={forks} inherited={inherited} parentTitle={parentTitle} />
 
       <Plate className="flex flex-col gap-2.5 px-6 pt-[22px] pb-7">
         <h2 className="m-0 text-section font-semibold tracking-[-0.01em]">{s.info.about}</h2>

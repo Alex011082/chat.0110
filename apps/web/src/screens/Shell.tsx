@@ -463,6 +463,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       selected={route.chatId}
       onOpen={openChat}
       onNew={startChat}
+      canCreate={canCreate}
       activation={activation}
       activating={activating}
       onActivate={() => void connectRepo()}
