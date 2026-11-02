@@ -183,7 +183,10 @@ export async function createApp(deps: AppDeps): Promise<App> {
 
     const res = await (async (): Promise<Response> => {
       if (path === "/api/connections" && method === "GET")
-        return json(200, { chatgpt: { ...events.status(`chatgpt:${session.uid}`), authorized: oauth.hasAuthorization(`chatgpt:${session.uid}`, "chatgpt.com") } });
+        return json(200, {
+          chatgpt: { ...events.status(`chatgpt:${session.uid}`), authorized: oauth.hasAuthorization(`chatgpt:${session.uid}`, "chatgpt.com") },
+          local: { authorized: ["127.0.0.1", "localhost"].some(host => oauth.hasAuthorization(`chatgpt:${session.uid}`, host)) },
+        });
       if (path === "/api/connections/disconnect" && method === "POST") {
         events.disconnect(`chatgpt:${session.uid}`);
         await oauth.disconnect(`chatgpt:${session.uid}`);
@@ -414,8 +417,13 @@ export async function createApp(deps: AppDeps): Promise<App> {
     if (req.headers.has("origin") && req.headers.get("origin") !== config.publicOrigin) throw forbidden("Чужой Origin");
     const token = req.headers.get("authorization")?.match(/^Bearer (\S+)$/)?.[1];
     if (!token) throw unauthorized();
-    const gh = new GitHubClient({ token, userId: 0, fetch: fetcher });
-    const user = await gh.getUser();
+    // Наш OAuth и legacy GitHub — разные credentials. Отозванный MCP-токен
+    // нельзя отправлять в GitHub в попытке угадать другой способ входа.
+    const principal = await oauth.principal(req);
+    const legacy = req.headers.get("x-chat0110-auth") !== "oauth" && /^(?:gh[pousr]_|github_pat_)/.test(token);
+    if (!principal && !legacy) throw unauthorized();
+    const gh = new GitHubClient({ token: principal?.session.at ?? token, userId: principal?.session.uid ?? 0, fetch: fetcher });
+    const user = principal ? { id: principal.session.uid, login: principal.session.login } : await gh.getUser();
     if (!isLoginAllowed(config, user.login)) throw forbidden("Вход закрыт");
     const body = await readJson(req);
     const ctx: ChatCtx = { gh, user: { login: user.login, id: user.id }, privacy };

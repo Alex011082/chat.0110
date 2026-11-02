@@ -6,7 +6,8 @@ import {setLocale} from "../src/strings.ts";
 test("исторический участник получает настоящую кнопку в чате, без ссылки на connect или popup",()=>{
  setLocale("ru");
  const html=renderToStaticMarkup(<ParticipantAutoReplies author="claude" sessions={[]} view={{sessions:[],chains:[],auto_requests:[]}} repo="a/b" chatId="20261031-abcd" canPush onChange={()=>{}}/>);
- expect(html).toContain("<button");expect(html).toContain("Включить автоответы");expect(html).not.toContain("href=\"/connect");
+ expect(html).toContain("<button");expect(html).toContain("Включить автоответы");expect(html).not.toMatch(/<a[^>]*>Включить автоответы<\/a>/);
+ expect(html).toContain("Скопировать команду MCP");
 });
 test("сохранённое включение без клиента честно показывает ожидание плагина",()=>{
  setLocale("en");
