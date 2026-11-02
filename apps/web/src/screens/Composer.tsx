@@ -299,7 +299,7 @@ export function Composer(p: ComposerProps) {
   }
 
   // На компьютере три плотных ряда: служебное (только когда есть), поле с
-  // кнопкой, одна строка подсказок. Лента выше должна оставаться главной.
+  // кнопкой, подсказки с переносом. Лента выше должна оставаться главной.
   return (
     <Body as="form" onSubmit={onSubmit} className="flex shrink-0 flex-col gap-2 px-4 pt-3 pb-3">
       {replyChip}
@@ -311,11 +311,13 @@ export function Composer(p: ComposerProps) {
           {sending ? (s.locale === "en" ? "Checking…" : "Проверяем…") : s.composer.send}
         </ActionKey>
       </div>
-      <div className="flex flex-wrap items-start gap-x-4 gap-y-1 px-1 text-cap text-ink-2">
-        <span id="mention-help">{d.help}</span>
-        {connectLink}
-        <span className="min-w-0 flex-1 truncate">{p.canPush ? s.composer.hint(p.branch) : s.composer.readOnly}</span>
-        <PrivacyPanel chatKey={p.chatKey} text={text} onApply={update} compact />
+      <div className="flex min-w-0 flex-col gap-1 px-1 text-cap text-ink-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+          <span id="mention-help" className="min-w-0 flex-[1_1_20rem] [overflow-wrap:anywhere]">{d.help}</span>
+          {connectLink}
+          <PrivacyPanel chatKey={p.chatKey} text={text} onApply={update} compact />
+        </div>
+        <span className="min-w-0 [overflow-wrap:anywhere]">{p.canPush ? s.composer.hint(p.branch) : s.composer.readOnly}</span>
       </div>
     </Body>
   );
