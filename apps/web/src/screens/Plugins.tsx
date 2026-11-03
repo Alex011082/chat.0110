@@ -20,7 +20,7 @@ export function Plugins(){
  return <main className="min-h-dvh bg-ground px-4 py-6 text-ink tab:px-8 tab:py-10">
   <div className="mx-auto flex max-w-6xl flex-col gap-8">
    <header className="flex items-center justify-between gap-4"><a href="/" aria-label="CHAT.0110"><Mark cell={3}/></a><LanguageSwitch/></header>
-   <div className="max-w-3xl">
+   <div>
     <a href="/" className="inline-flex min-h-10 items-center text-cap text-ink-2">← {en?"Back to chats":"К чатам"}</a>
     <h1 className="m-0 mt-3 text-title font-semibold">{en?"CHAT.0110 plugins":"Плагины CHAT.0110"}</h1>
     <p className="mb-0 mt-4 text-copy text-ink-2">{en?"Connect your existing Codex or Claude Code session. Choose its alias in the chat, then control automatic replies next to its name.":"Подключи свою существующую сессию Codex или Claude Code. Выбери её alias в чате — дальше управляй автоответами рядом с её именем."}</p>

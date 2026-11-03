@@ -1,6 +1,7 @@
 import { LanguageSwitch } from "../ui/LanguageSwitch.tsx";
 import { s } from "../strings.ts";
 import { cx, Knob, Mark, TextButton } from "../ui/kit.tsx";
+import { setDesign, useDesign } from "../lib/design.ts";
 
 interface RailProps {
   /** Какой раздел открыт: ручка текущего — чёрная. */
@@ -16,6 +17,13 @@ interface RailProps {
 
 /** Алюминиевый рельс с ручками разделов. */
 export function Rail({ view, onChats, onTree, onNew, onLogout, canCreate, bottom }: RailProps) {
+  // Переключатель дизайна: на рельсе «прибора» и в светлом на телефоне (там рельс внизу).
+  const light = useDesign() === "light";
+  const designSwitch = (
+    <TextButton onClick={() => setDesign(light ? "device" : "light")} className="min-h-10 px-2.5 text-center">
+      {light ? s.design.toDevice : s.design.toLight}
+    </TextButton>
+  );
   const knobs = (
     <>
       <Knob label={s.rail.chats} current={view === "chats"} onClick={onChats} />
@@ -33,6 +41,7 @@ export function Rail({ view, onChats, onTree, onNew, onLogout, canCreate, bottom
         <div className="flex w-full items-center justify-between gap-2">
         <LanguageSwitch />
         <a href="/plugins" className="text-cap text-ink-2">{s.locale === "en" ? "AI plugins" : "Плагины ИИ"}</a>
+        {designSwitch}
         <TextButton onClick={onLogout} className="mt-[9px] min-h-10 px-2.5">
           {s.rail.logout}
         </TextButton>
@@ -53,6 +62,7 @@ export function Rail({ view, onChats, onTree, onNew, onLogout, canCreate, bottom
       {knobs}
         <LanguageSwitch />
         <a href="/plugins" className="text-cap text-ink-2">{s.locale === "en" ? "AI plugins" : "Плагины ИИ"}</a>
+        {designSwitch}
       <TextButton onClick={onLogout} className="mt-auto min-h-10 px-2.5">
         {s.rail.logout}
       </TextButton>

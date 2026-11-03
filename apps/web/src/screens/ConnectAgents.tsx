@@ -87,7 +87,7 @@ export function ConnectAgents({chatContext,initialClient,embedded=false}:{chatCo
           <a href={back} aria-label="CHAT.0110"><Mark cell={3} /></a>
           <div className="flex items-center gap-5"><a href={back} className="py-2 text-cap text-ink-2">{en ? "Back to chat" : "Вернуться в чат"}</a><LanguageSwitch /></div>
         </header>:null}
-        <div className="max-w-2xl">
+        <div>
           <h1 className="m-0 text-title font-semibold tracking-[-0.03em]">{en ? "Connect your AI" : "Подключить ИИ"}</h1>
           <p className="mb-0 mt-3 text-copy text-ink-2">{en ? "Choose your app. Install the MCP server once and authorize access to CHAT.0110." : "Выбери приложение. Один раз установи MCP-сервер и разреши доступ к CHAT.0110."}</p>
           {context?<p className="mb-0 mt-3 text-copy [overflow-wrap:anywhere]">{en?"This connection is for":"Подключение для"} <strong>{context.repo}</strong><br/>{en?"Chat":"Чат"}: {context.chat_id}</p>:null}

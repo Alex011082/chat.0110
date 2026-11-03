@@ -22,6 +22,8 @@ import { ProposeDialog, type ProposeTarget } from "./ProposeDialog.tsx";
 import { Rail } from "./Rail.tsx";
 import { TreeView } from "./TreeView.tsx";
 import {drafts} from "../lib/drafts.ts";
+import { useDesign } from "../lib/design.ts";
+import { LightSidebar } from "./LightSidebar.tsx";
 
 const LAST_REPO = "chat0110.lastRepo";
 const POLL_MS = 60_000;
@@ -57,6 +59,9 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
   const layout = useLayout();
   const now = useNow();
   const phone = layout === "phone";
+  // Светлый дизайн меняет раскладку компьютера и планшета; телефон пока тот же,
+  // только в светлых цветах.
+  const light = useDesign() === "light" && !phone;
 
   const [repos, setRepos] = useState<RepoInfo[] | null>(null);
   const [activation, setActivation] = useState<ChatActivation | null>(null);
@@ -484,6 +489,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       installUrl={installUrl}
       now={now}
       phone={phone}
+      light={light}
     />
   );
 
@@ -520,6 +526,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
         onDecide={decide}
         onDecision={onDecision}
         onPropose={current.data.chat_store === 2 || !current.data.chat.parent ? null : openPropose}
+        light={light}
       />
     );
   } else if (route.chatId && current.error && current.error.code !== "network" && current.error.code !== "rate_limited") {
@@ -603,6 +610,37 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
     />
   );
 
+  const sidebar = (view: "chats" | "tree") => (
+    <LightSidebar
+      login={me.login}
+      view={view}
+      onChats={toList}
+      onTree={toTree}
+      onNew={startChat}
+      canCreate={canCreate}
+      onLogout={onLogout}
+    >
+      {list}
+    </LightSidebar>
+  );
+  const infoSheet = (
+    <Sheet
+      open={infoOpen && !!info}
+      onClose={() => setInfoOpen(false)}
+      label={s.info.label}
+      dismissOnBackdrop
+      className="mr-0 ml-auto h-dvh max-h-dvh w-[min(360px,100vw)]"
+    >
+      <aside className="box-border h-full overflow-y-auto bg-ground px-[22px] pt-5 pb-8">
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <h2 className="m-0 text-section font-semibold">{s.info.label}</h2>
+          <RoundKey glyph="×" aria-label={s.info.closeInfo} onClick={() => setInfoOpen(false)} />
+        </div>
+        {info}
+      </aside>
+    </Sheet>
+  );
+
   if (route.tree) {
     const tree = (
       <TreeView
@@ -627,6 +665,11 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
           <div className="flex h-dvh flex-col bg-ground">
             <main className="min-h-0 flex-1">{tree}</main>
             {rail(true)}
+          </div>
+        ) : light ? (
+          <div className="grid h-dvh grid-cols-[272px_minmax(0,1fr)] bg-ground text-ink">
+            {sidebar("tree")}
+            <main className="box-border flex h-dvh min-w-0 flex-col bg-body px-5 py-5">{tree}</main>
           </div>
         ) : (
           <div className="grid h-dvh grid-cols-[104px_minmax(0,1fr)] bg-ground text-ink">
@@ -669,6 +712,20 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
     return (
       <>
         {screen}
+        {dialog}
+        {forkDialog}
+      </>
+    );
+  }
+
+  if (light) {
+    return (
+      <>
+        <div className="grid h-dvh grid-cols-[272px_minmax(0,1fr)] bg-ground text-ink">
+          {sidebar("chats")}
+          <main className="flex h-dvh min-w-0 flex-col bg-body">{current.data ? main : <div className="p-6">{main}</div>}</main>
+        </div>
+        {infoSheet}
         {dialog}
         {forkDialog}
       </>

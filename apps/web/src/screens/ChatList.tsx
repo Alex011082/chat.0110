@@ -28,6 +28,8 @@ interface ChatListProps {
   now: number;
   /** На телефоне сверху — знак 0110. */
   phone?: boolean;
+  /** Светлый дизайн: колонка без своего заголовка и без клавиши «Новый чат» — они в LightSidebar. */
+  light?: boolean;
 }
 
 export function ChatList(p: ChatListProps) {
@@ -37,16 +39,16 @@ export function ChatList(p: ChatListProps) {
 
   if (p.repos && p.repos.length === 0) {
     return (
-      <Wrap phone={p.phone}>
+      <Wrap phone={p.phone} light={p.light}>
         <NoRepos installUrl={p.installUrl} />
       </Wrap>
     );
   }
 
   return (
-    <Wrap phone={p.phone}>
+    <Wrap phone={p.phone} light={p.light}>
       <label className="flex flex-col gap-1.5">
-        <span className="text-cap font-semibold">{s.list.repo}</span>
+        <span className={p.light ? "sr-only-text" : "text-cap font-semibold"}>{s.list.repo}</span>
         <select
           className={cx(SLOT, "text-key")}
           value={current?.full_name ?? ""}
@@ -62,9 +64,11 @@ export function ChatList(p: ChatListProps) {
         </select>
       </label>
 
-      <Key onClick={p.onNew} disabled={!p.canCreate} className="w-full">
-        {s.newChat.title}
-      </Key>
+      {p.light ? null : (
+        <Key onClick={p.onNew} disabled={!p.canCreate} className="w-full">
+          {s.newChat.title}
+        </Key>
+      )}
 
       <Activation
         activation={p.activation}
@@ -74,6 +78,7 @@ export function ChatList(p: ChatListProps) {
         migration={p.migration}
         migrating={p.migrating}
         onMigrate={p.onMigrate}
+        light={p.light}
       />
 
       <label className="flex flex-col gap-1.5">
@@ -160,7 +165,14 @@ function Nodes({ nodes, p, nested }: { nodes: ChatTreeNode[]; p: ChatListProps; 
   );
 }
 
-function Wrap({ phone, children }: { phone?: boolean | undefined; children: ReactNode }) {
+function Wrap({ phone, light, children }: { phone?: boolean | undefined; light?: boolean | undefined; children: ReactNode }) {
+  if (light && !phone) {
+    return (
+      <aside aria-label={s.list.label} className="box-border flex min-w-0 flex-col gap-2.5 px-3 pt-1 pb-4">
+        {children}
+      </aside>
+    );
+  }
   return (
     <aside
       aria-label={s.list.label}
@@ -210,7 +222,7 @@ function Row({
         onOpen(chat);
       }}
       className={cx(
-        "flex rounded-row text-ink no-underline hover:text-ink",
+        "chat-row flex rounded-row text-ink no-underline hover:text-ink",
         compact ? "gap-2.5" : "gap-3",
         selected ? (compact ? "pressed px-3 py-2.5" : "pressed p-3.5") : compact ? "bg-body px-3 pt-2.5 pb-3.5" : "bg-body px-3.5 pt-3 pb-4",
         !selected && !archived && "plinth-row active:translate-y-px",
@@ -239,6 +251,7 @@ function Activation({
   migration,
   migrating,
   onMigrate,
+  light,
 }: {
   activation: ChatActivation | null;
   activating: boolean;
@@ -247,6 +260,7 @@ function Activation({
   migration: ChatMigration | null;
   migrating: boolean;
   onMigrate: () => void;
+  light?: boolean | undefined;
 }) {
   if (!activation) return null;
   const pending = migration?.items.some((item) => item.status === "pending") ?? false;
@@ -264,6 +278,9 @@ function Activation({
   const showConnect = canPush && !activation.protocol_invalid && activation.gaps.length > 0;
   const showMigrate = canPush && pending;
   const busy = activating || migrating;
+  // Светлый дизайн не держит на экране справку «всё в порядке»: плашка — только
+  // когда надо действовать или что-то сломано.
+  if (light && activation.activated && !showConnect && !showMigrate && !blocked && !activation.protocol_invalid) return null;
   return (
     <Plate className="flex flex-col items-start gap-2.5 px-4 py-3.5">
       <p className="m-0 text-cap leading-[1.45] text-ink-2">{text}</p>
