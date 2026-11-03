@@ -16,7 +16,10 @@ import {
   type DecisionResponse,
   type ForkRequest,
   type GraphResponse,
+  type InviteResponse,
   type Me,
+  type PeopleResponse,
+  type Person,
   type PostMessageRequest,
   type PostMessageResponse,
   type ProposeToParentRequest,
@@ -92,6 +95,10 @@ export interface Api {
   ): Promise<DecisionResponse>;
   /** «Предложить родителю»: предложение ложится в ветку и решения РОДИТЕЛЯ. */
   proposeToParent(repo: string, forkChatId: string, req: ProposeToParentRequest): Promise<DecisionResponse>;
+  /** Поиск среди тех, кто входил в chat.0110: от двух знаков логина или имени. */
+  people(query: string): Promise<Person[]>;
+  /** Приглашение вошедшего человека: GitHub зовёт его в репозиторий чата. */
+  invite(repo: string, chatId: string, login: string): Promise<InviteResponse>;
   logout(): Promise<void>;
   subscribe(repo: string, handlers: LiveHandlers): () => void;
 }
@@ -210,6 +217,8 @@ export const httpApi: Api = {
       req ?? {},
     ),
   proposeToParent: (repo, forkChatId, req) => request<DecisionResponse>("POST", `${chatPath(repo, forkChatId)}/propose`, req),
+  people: async (query) => (await request<PeopleResponse>("GET", `/api/people?q=${encodeURIComponent(query)}`)).people,
+  invite: (repo, chatId, login) => request<InviteResponse>("POST", `${chatPath(repo, chatId)}/invite`, { login }),
   logout: async () => {
     await request<unknown>("POST", "/auth/logout", {});
   },

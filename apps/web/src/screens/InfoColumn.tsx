@@ -31,10 +31,12 @@ interface InfoProps {
   onPropose: (() => void) | null;
   /** 2 — инструкция в Chat/AGENTS.md. Без поля чат ещё на схеме 1. */
   store?: 1 | 2;
+  /** Блок «Ссылка для агента». В светлом дизайне её даёт «+» в шапке одним касанием. */
+  agentLink?: boolean;
 }
 
 /** Правая колонка: участники, ссылка для агента, решения, ветвления, паспорт чата. */
-export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, decisions, outgoing, onJump, onPropose, store }: InfoProps) {
+export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, decisions, outgoing, onJump, onPropose, store, agentLink = true }: InfoProps) {
   const counts = useMemo(() => countTimeline(items), [items]);
   const owner = chat.created_by.toLowerCase();
   const [autoReplies, setAutoReplies] = useState<AutoReplyView | null>(null);
@@ -100,24 +102,26 @@ export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, de
         {autoError ? <p role="status" className="m-0 text-cap text-ink-2">{s.locale === "en" ? "Connection status unavailable. Retrying…" : "Не удалось проверить сессии. Повторяем…"}</p> : null}
       </Plate>
 
-      <Body className="flex flex-col gap-3.5 px-[18px] pt-[18px] pb-[26px]">
-        <div className="flex items-center justify-between gap-2.5">
-          <h2 className="m-0 text-section font-semibold tracking-[-0.01em]">{s.info.agentLink}</h2>
-          <Grille width={46} height={16} />
-        </div>
-        <p className="m-0 text-cap leading-[1.45] text-ink-2">{s.info.agentLinkHelp}</p>
-        <Screen as="div" className="px-4 py-3.5 text-key leading-[1.45] [overflow-wrap:anywhere]">
-          {phrase}
-        </Screen>
-        <div className="flex items-center gap-3">
-          <Key onClick={() => copy(phrase)} className="self-start">
-            {s.info.copy}
-          </Key>
-          <span aria-live="polite" className="text-cap text-ink-2">
-            {copied ? s.copied : failed ? s.errors.copyFailed : ""}
-          </span>
-        </div>
-      </Body>
+      {agentLink ? (
+        <Body className="flex flex-col gap-3.5 px-[18px] pt-[18px] pb-[26px]">
+          <div className="flex items-center justify-between gap-2.5">
+            <h2 className="m-0 text-section font-semibold tracking-[-0.01em]">{s.info.agentLink}</h2>
+            <Grille width={46} height={16} />
+          </div>
+          <p className="m-0 text-cap leading-[1.45] text-ink-2">{s.info.agentLinkHelp}</p>
+          <Screen as="div" className="px-4 py-3.5 text-key leading-[1.45] [overflow-wrap:anywhere]">
+            {phrase}
+          </Screen>
+          <div className="flex items-center gap-3">
+            <Key onClick={() => copy(phrase)} className="self-start">
+              {s.info.copy}
+            </Key>
+            <span aria-live="polite" className="text-cap text-ink-2">
+              {copied ? s.copied : failed ? s.errors.copyFailed : ""}
+            </span>
+          </div>
+        </Body>
+      ) : null}
 
       <Decisions chat={chat} decisions={decisions} now={now} onJump={onJump} />
 

@@ -2,7 +2,16 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { cx } from "./kit.tsx";
 
 export type MenuItem =
-  | { kind: "button"; label: string; onClick: () => void; disabled?: boolean; title?: string }
+  | {
+      kind: "button";
+      label: string;
+      onClick: () => void;
+      disabled?: boolean;
+      title?: string;
+      /** Вторая строка под названием — как в выборе «Пригласить в чат». */
+      hint?: string;
+      icon?: ReactNode;
+    }
   | { kind: "link"; label: string; href: string; external?: boolean }
   | { kind: "node"; node: ReactNode };
 
@@ -95,13 +104,25 @@ export function Menu({
                 role="menuitem"
                 title={item.title}
                 disabled={item.disabled}
-                className={cx(row, "border-0 bg-transparent disabled:cursor-default disabled:text-ink-3 disabled:hover:bg-transparent")}
+                className={cx(
+                  row,
+                  "border-0 bg-transparent disabled:cursor-default disabled:text-ink-3 disabled:hover:bg-transparent",
+                  !!(item.hint || item.icon) && "gap-3 py-2",
+                )}
                 onClick={() => {
                   setOpen(false);
                   item.onClick();
                 }}
               >
-                {item.label}
+                {item.icon}
+                {item.hint ? (
+                  <span className="flex min-w-0 flex-col">
+                    <span className="font-semibold">{item.label}</span>
+                    <span className="text-cap text-ink-2">{item.hint}</span>
+                  </span>
+                ) : (
+                  item.label
+                )}
               </button>
             ),
           )}

@@ -15,6 +15,7 @@ import {
   type GraphDecision,
   type MessageItem,
   type Participant,
+  type Person,
   type RepoInfo,
   type TimelineItem,
   type TimelineResponse,
@@ -45,6 +46,13 @@ const GH = `https://github.com/${REPO}`;
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const ME = "alex011082";
+/** Кто «входил» в пробный chat.0110 — для поиска в «Пригласить человека». */
+const PEOPLE: Person[] = [
+  { login: "sivanov", name: "Сергей Иванов", avatar_url: "" },
+  { login: "serg-kim", name: "Сергей Ким", avatar_url: "" },
+  { login: "seraphima", name: "Серафима Лев", avatar_url: "" },
+  { login: "dkogan", name: "Дана Коган", avatar_url: "" },
+];
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const iso = (t: number) => new Date(t).toISOString();
@@ -637,6 +645,22 @@ export function createMockApi(mode: string): Api {
       touch(parentId);
       touch(forkChatId);
       return { decision: structuredClone(decisionOf(parentId, p.id)) };
+    },
+    async people(query) {
+      await wait(200);
+      const q = query.trim().replace(/^@/, "").toLowerCase();
+      if (q.length < 2) return [];
+      return PEOPLE.filter((p) => p.login.includes(q) || (p.name ?? "").toLowerCase().includes(q));
+    },
+    async invite(_repo, chatId, login) {
+      await wait(400);
+      writable();
+      chatOf(chatId);
+      const person = PEOPLE.find((p) => p.login === login.toLowerCase());
+      if (!person) throw new ApiFailure(404, "not_found", "Этот человек ещё не входил в chat.0110");
+      if (mode === "noadmin")
+        throw new ApiFailure(403, "forbidden", "У приложения chat.0110 нет права приглашать в репозиторий. Владелец включает его на GitHub: настройки приложения → Repository permissions → Administration → Read and write.");
+      return { login: person.login, status: "invited" };
     },
     async logout() {
       await wait(100);
