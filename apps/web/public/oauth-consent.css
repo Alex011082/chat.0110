@@ -142,7 +142,7 @@ h1 {
   letter-spacing: -0.03em;
   margin: 0 0 12px;
   font-weight: 600;
-  text-wrap: balance;
+
 }
 .intro {
   color: var(--muted);
