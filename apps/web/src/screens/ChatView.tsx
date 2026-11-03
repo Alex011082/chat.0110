@@ -1,15 +1,17 @@
 import { LanguageSwitch } from "../ui/LanguageSwitch.tsx";
-import type { MessageItem, TimelineResponse } from "@chat0110/chat-protocol";
+import type { MessageItem, Participant, TimelineResponse } from "@chat0110/chat-protocol";
 import { useMemo, type ReactNode } from "react";
 import { ApiFailure, errorText } from "../api.ts";
 import { lastForkable } from "../lib/fork.ts";
 import { chatRoute } from "../lib/route.ts";
-import { plural } from "../lib/text.ts";
+import { initials, plural } from "../lib/text.ts";
 import { ago } from "../lib/time.ts";
 import { countTimeline, type LocalEntry } from "../lib/timeline.ts";
 import { forms, s } from "../strings.ts";
 import { AppLink } from "../ui/AppLink.tsx";
 import { Body, cx, Grille, Key, KeyLink, Lamp, Readout, RoundKey, Screen, type LampState } from "../ui/kit.tsx";
+import { DotsIcon } from "../ui/icons.tsx";
+import { Menu, type MenuItem } from "../ui/Menu.tsx";
 import { Composer } from "./Composer.tsx";
 import type { DecisionHandler } from "./DecisionCard.tsx";
 import { Timeline } from "./Timeline.tsx";
@@ -55,6 +57,8 @@ interface ChatViewProps {
   onDecision: DecisionHandler;
   /** «Предложить родителю» — только у Fork. */
   onPropose: (() => void) | null;
+  /** Светлый дизайн: тонкая шапка, участники и редкие действия за кнопками. */
+  light?: boolean;
 }
 
 export function ChatView(p: ChatViewProps) {
@@ -96,6 +100,7 @@ export function ChatView(p: ChatViewProps) {
       onSend={p.onSend}
       phone={p.phone}
       focusTick={p.focusTick}
+      light={p.light && !p.phone}
     />
   );
 
@@ -123,6 +128,37 @@ export function ChatView(p: ChatViewProps) {
         </div>
         {composer}
       </div>
+    );
+  }
+
+  if (p.light) {
+    const more: MenuItem[] = [
+      {
+        kind: "button",
+        label: s.header.fork,
+        title: forkFrom ? s.header.forkHint : s.header.forkNoMessages,
+        disabled: !forkFrom,
+        onClick: () => forkFrom && p.onFork(forkFrom),
+      },
+      ...(p.onPropose ? [{ kind: "button" as const, label: s.header.propose, title: s.header.proposeHint, onClick: p.onPropose }] : []),
+      { kind: "link", label: s.header.openInGitHub, href: chat.url, external: true },
+    ];
+    return (
+      <>
+        <header className="flex shrink-0 items-center gap-3 border-b border-line px-5 py-3">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <h1 className="m-0 truncate text-[17px] leading-snug font-semibold tracking-[-0.01em]">{chat.title}</h1>
+            <span className="flex min-w-0 items-center gap-1.5 text-cap text-ink-2" aria-live="polite">
+              <Lamp state={status.lamp} size={8} ring={false} />
+              <span className="truncate">{status.lamp === "act" ? status.text : s.header.phoneStatus(chat.number, status.text)}</span>
+            </span>
+          </div>
+          <ParticipantStack participants={chat.participants} expanded={p.infoOpen} onClick={p.onInfo} />
+          <Menu label={s.design.more} trigger={<DotsIcon />} items={more} />
+        </header>
+        {timeline}
+        {composer}
+      </>
     );
   }
 
@@ -226,5 +262,41 @@ export function MainPlaceholder({
         {action ? <div className="pt-1">{action}</div> : null}
       </Body>
     </div>
+  );
+}
+
+/**
+ * Участники стопкой кружков — кнопка светлой шапки. Открывает сведения о чате:
+ * участников с автоответами, ссылку для агента, развилки и решения
+ * (InfoColumn), которые в «приборе» стоят отдельной колонкой.
+ */
+function ParticipantStack({ participants, expanded, onClick }: { participants: Participant[]; expanded: boolean; onClick: () => void }) {
+  const shown = participants.slice(0, 3);
+  const rest = participants.length - shown.length;
+  return (
+    <button
+      type="button"
+      aria-label={s.design.participants}
+      title={s.design.participants}
+      aria-expanded={expanded}
+      onClick={onClick}
+      className="flex h-9 shrink-0 items-center rounded-full border-0 bg-transparent py-1 pr-2.5 pl-1 hover:bg-screen"
+    >
+      {shown.map((m, i) => (
+        <span
+          key={m.author}
+          aria-hidden="true"
+          className={cx(
+            "flex size-7 items-center justify-center rounded-full text-[11px] font-semibold ring-2 ring-[var(--body)]",
+            m.is_agent ? "bg-screen text-ink" : "bg-knob-ink text-knob-ink-fg",
+            i > 0 && "-ml-2",
+          )}
+        >
+          {initials(m.author, m.display)}
+        </span>
+      ))}
+      {participants.length === 0 ? <span className="px-1 text-cap text-ink-2">{s.info.participants}</span> : null}
+      {rest > 0 ? <span className="ml-1.5 text-cap text-ink-2">+{rest}</span> : null}
+    </button>
   );
 }

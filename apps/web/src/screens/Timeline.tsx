@@ -34,6 +34,7 @@ import { forms, s } from "../strings.ts";
 import { AppLink } from "../ui/AppLink.tsx";
 import { cx, Key, Lamp, Screen, TextButton, TextLink } from "../ui/kit.tsx";
 import { Markdown } from "../ui/Markdown.tsx";
+import { useDesign } from "../lib/design.ts";
 import { DecisionCard, OutgoingProposals, type DecisionHandler } from "./DecisionCard.tsx";
 
 export interface TimelineProps {
@@ -178,7 +179,7 @@ export function Timeline(p: TimelineProps) {
   return (
     <section
       aria-label={s.timeline.label}
-      className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-plate bg-plate plinth-6"
+      className="timeline-box flex min-h-0 flex-1 flex-col overflow-hidden rounded-plate bg-plate plinth-6"
     >
       <div
         ref={scroller}
@@ -452,16 +453,26 @@ function metaLine(m: MessageItem): string {
   return parts.join(" · ");
 }
 
+/** Длиннее — в светлом дизайне сообщение агента приходит свёрнутым. */
+const CLAMP_CHARS = 600;
+
 function Message({ m, first, published, ctx }: { m: MessageItem; first: boolean; published: boolean; ctx: EntryCtx }) {
   const reply = m.reply_to ? resolveReply(ctx.known, m.reply_to) : null;
   const { copied, copy } = useCopy();
   const flashing = ctx.flashId === m.id;
   const forks = ctx.forksAt.get(m.id);
+  // Светлый: в строке — имя и время, остальное (агент, от чьего имени, файл,
+  // «опубликовано») — во всплывающей подсказке времени. Длинный ответ агента
+  // свёрнут; глубокая ссылка на него разворачивает.
+  const light = useDesign() === "light";
+  const long = light && isAgent(m.author) && m.text.length > CLAMP_CHARS;
+  const [expanded, setExpanded] = useState(false);
+  const clamped = long && !expanded && !flashing;
   return (
     <article
       id={m.id}
       className={cx(
-        "flex scroll-mt-4 gap-3.5 py-3.5 tab:py-4",
+        "msg flex scroll-mt-4 gap-3.5 py-3.5 tab:py-4",
         !first && "border-t border-line",
         flashing && "flash",
         flashing && ctx.flashDone && "flash-done",
@@ -471,9 +482,15 @@ function Message({ m, first, published, ctx }: { m: MessageItem; first: boolean;
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <b className="text-copy font-semibold">{m.display}</b>
-          <span className="text-cap text-ink-2">{metaLine(m)}</span>
+          {light ? (
+            <span className="text-cap text-ink-3" title={published ? `${metaLine(m)} · ${s.timeline.published}` : metaLine(m)}>
+              {clock(m.created_at)}
+            </span>
+          ) : (
+            <span className="text-cap text-ink-2">{metaLine(m)}</span>
+          )}
           {m.pending ? <span className="text-cap text-action-ink">{s.timeline.notMerged}</span> : null}
-          {published ? (
+          {published && !light ? (
             <span className="flex items-center gap-1.5 text-cap text-ink-2">
               <Lamp state="live" size={8} ring={false} />
               {s.timeline.published}
@@ -481,9 +498,16 @@ function Message({ m, first, published, ctx }: { m: MessageItem; first: boolean;
           ) : null}
         </div>
         {reply ? <span className="text-cap text-ink-2">{replyLine(reply)}</span> : null}
-        <Markdown text={m.text} />
+        <div className={clamped ? "msg-clamp" : undefined}>
+          <Markdown text={m.text} />
+        </div>
+        {long ? (
+          <TextButton aria-expanded={!clamped} onClick={() => setExpanded((e) => !e)} className="self-start text-action-ink">
+            {clamped ? s.design.showMore : s.design.showLess}
+          </TextButton>
+        ) : null}
         <PrivacyNotice text={m.text} />
-        <div className="flex flex-wrap gap-4">
+        <div className="msg-actions flex flex-wrap gap-4">
           <TextButton onClick={() => ctx.onReply(m)}>{s.timeline.reply}</TextButton>
           {m.url ? (
             <TextLink href={m.url} target="_blank" rel="noopener noreferrer">

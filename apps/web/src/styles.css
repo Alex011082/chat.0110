@@ -436,5 +436,141 @@
 .max-h-dvh{max-height:var(--stage-height,100dvh)}
 .app-status-bar{box-sizing:border-box;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:max(6px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) 6px max(14px,env(safe-area-inset-left));border-bottom:1px solid var(--line);background:var(--rail);flex-shrink:0}
 .app-install-help summary{cursor:pointer;font-size:13px;line-height:1.4;min-height:40px;display:flex;align-items:center;text-decoration:underline;text-underline-offset:4px}
-.app-install-help p{max-width:36rem;font-size:14px;line-height:1.5;margin:8px 0 12px;color:var(--ink-2)}
+.app-install-help p{font-size:14px;line-height:1.5;margin:8px 0 12px;color:var(--ink-2)}
 @media(max-width:699px){textarea,input,select{font-size:16px}.app-stage{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}}
+
+/*
+  Светлый дизайн (lib/design.ts, макет владельца 03.11.2026). Тот же набор
+  токенов, другие значения: плоско, без цоколей и теней — граница волосяной
+  линией; светлый и в тёмной системе (выбор владельца, а не системы).
+  Утилиты plinth-* и recess* читают --hi/--base/--lift/--recess — им хватает
+  новых значений. Скругления Tailwind вшиты (@theme inline), их меняем классами.
+*/
+:root[data-design="light"] {
+  color-scheme: light;
+
+  --ground: #f7f7f5;
+  --rail: #f7f7f5;
+  --body: #ffffff;
+  --base: transparent;
+  --plate: #ffffff;
+  --slot: #ffffff;
+  --screen: #f3f3f0;
+  --ink: #1b1c1d;
+  --ink-2: #5d6266;
+  --ink-3: #8c9195;
+  --line: rgba(27, 28, 29, 0.1);
+  --pilot: #2f9a55;
+  --lamp: #f0601c;
+  --action: #d9541a;
+  --action-ink: #b8460f;
+  --lamp-off: #c4c7c9;
+
+  --hi: 0 0 #0000;
+  --lift: 0 0 0 1px var(--line);
+  --recess: inset 0 0 0 1px rgba(27, 28, 29, 0.16);
+  --recess-screen: 0 0 #0000;
+  --recess-row: 0 0 #0000;
+  --lift-row: 0 0 #0000;
+  --lift-knob: 0 0 0 1px var(--line);
+  --lift-avatar: 0 0 #0000;
+  --lift-sheet: 0 24px 48px -24px rgba(27, 28, 29, 0.28), 0 0 0 1px var(--line);
+  --action-base: transparent;
+  --action-hi: 0 0 #0000;
+  --knob-ink: #e7eefb;
+  --knob-ink-fg: #24508f;
+  --knob-ink-base: transparent;
+  --knob-ink-hi: 0 0 #0000;
+  --backdrop: rgba(27, 28, 29, 0.28);
+}
+:root[data-design="light"] .rounded-device,
+:root[data-design="light"] .rounded-entry {
+  border-radius: 14px;
+}
+:root[data-design="light"] .rounded-plate,
+:root[data-design="light"] .rounded-body {
+  border-radius: 12px;
+}
+:root[data-design="light"] .rounded-screen,
+:root[data-design="light"] .rounded-row {
+  border-radius: 10px;
+}
+:root[data-design="light"] .rounded-slot {
+  border-radius: 8px;
+}
+/* Клавиши без цоколя: убираем нижний отступ под тень и сдвиг при нажатии. */
+:root[data-design="light"] .pb-\[3px\].rounded-full {
+  padding-bottom: 0;
+}
+:root[data-design="light"] .slot:focus,
+:root[data-design="light"] .slot:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--lamp), 0 0 0 3px color-mix(in srgb, var(--lamp) 18%, transparent);
+}
+/* Выбранная строка списка — тихая подложка, а не вдавленная клавиша. */
+:root[data-design="light"] .pressed {
+  background-color: #ececea;
+}
+:root[data-design="light"] .tree-hi {
+  stroke: rgba(255, 255, 255, 0.75);
+}
+:root[data-design="light"] .tree-cap {
+  stroke: var(--line);
+}
+
+/* Лента в светлом: действия под сообщением — при наведении или фокусе;
+   на сенсорных экранах наведения нет, поэтому там они видны всегда. */
+@media (hover: hover) {
+  :root[data-design="light"] .msg .msg-actions {
+    opacity: 0;
+    transition: opacity 0.12s ease;
+  }
+  :root[data-design="light"] .msg:hover .msg-actions,
+  :root[data-design="light"] .msg:focus-within .msg-actions {
+    opacity: 1;
+  }
+}
+/* Свёрнутое длинное сообщение агента: высота ~6 строк, низ гаснет. */
+.msg-clamp {
+  max-height: 9.2em;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent);
+  mask-image: linear-gradient(to bottom, #000 70%, transparent);
+}
+/* Строки списка чатов в светлом: без карточек, подсветка при наведении. */
+:root[data-design="light"] .chat-row {
+  background-color: transparent;
+  box-shadow: none;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+:root[data-design="light"] .chat-row:hover {
+  background-color: #efefec;
+}
+:root[data-design="light"] .chat-row.pressed {
+  background-color: #e8e8e5;
+}
+/* Лента, шапка и поле ввода светлого — одна плоскость на белом, без карточек. */
+:root[data-design="light"] .timeline-box {
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+:root[data-design="light"] .avatar-plastic {
+  background-color: var(--screen);
+  box-shadow: none;
+}
+:root[data-design="light"] .avatar-ink {
+  box-shadow: none;
+}
+/* «Решётка-динамик» — деталь прибора; в светлом её нет. */
+:root[data-design="light"] .grille {
+  display: none;
+}
+/* Переключатель языка: серая дорожка, выбранный язык — белая таблетка. */
+:root[data-design="light"] .lang-switch {
+  background-color: var(--screen);
+}
+:root[data-design="light"] .lang-switch [aria-pressed="true"] {
+  background-color: #ffffff;
+  box-shadow: 0 0 0 1px var(--line);
+}

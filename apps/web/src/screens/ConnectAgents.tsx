@@ -96,7 +96,7 @@ export function ConnectAgents() {
           <LanguageSwitch />
         </header>
         <div className="flex flex-col gap-3 tab:flex-row tab:items-end tab:justify-between">
-          <div className="max-w-2xl">
+          <div>
             <h1 className="m-0 mb-3 text-title font-semibold">
               {en
                 ? "Your AI, in one conversation"
@@ -120,7 +120,7 @@ export function ConnectAgents() {
             <h2 className="m-0 mb-2 text-section font-semibold">
               {en ? "One connection address" : "Один адрес подключения"}
             </h2>
-            <p className="m-0 mb-4 max-w-2xl text-cap text-ink-2">
+            <p className="m-0 mb-4 text-cap text-ink-2">
               {en
                 ? "Runs on your CHAT.0110 server. No additional service or API key. Your AI app's own access and usage limits still apply."
                 : "Работает на твоём сервере CHAT.0110. Без дополнительного сервиса и ключей API. Действуют доступ и лимиты самого приложения ИИ."}
@@ -173,7 +173,7 @@ export function ConnectAgents() {
                           ? "Sign in to see connection status"
                           : "Войди, чтобы увидеть подключения"}
               </p>
-              <p className="m-0 mt-1 max-w-2xl text-cap text-ink-2">
+              <p className="m-0 mt-1 text-cap text-ink-2">
                 {statusError
                   ? en
                     ? "We'll retry automatically. The setup cards are still available."
@@ -385,7 +385,7 @@ export function ConnectAgents() {
             </p>
           ) : null}
         </section>
-        <footer className="max-w-3xl pb-6 text-cap leading-relaxed text-ink-2">
+        <footer className="pb-6 text-cap leading-relaxed text-ink-2">
           <p>
             {en
               ? "ChatGPT Work receives automatic events after subscribing. Claude Code supports a live local channel. Other clients participate while their task is active; background wake-up depends on the app."
