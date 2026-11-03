@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Выкат chat.0110 на Jarvis. Уезжает только закоммиченное состояние: git archive
-# HEAD собирается локально (web) и копируется в /opt/chat0110/releases/<sha>.
+# HEAD собирается локально или на сервере и копируется в /opt/chat0110/releases/<sha>.
 # Секреты в /etc/chat0110/chat0110.env выкат не трогает.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -15,9 +15,28 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
 fi
 SHA=$(git rev-parse --short=12 HEAD)
 STAGE=$(mktemp -d)
-trap 'rm -rf "$STAGE"' EXIT
+REMOTE_STAGE=""
+cleanup() {
+  rm -rf "$STAGE"
+  if [ -n "$REMOTE_STAGE" ]; then
+    ssh "$SERVER" "rm -rf -- '$REMOTE_STAGE'" || true
+  fi
+}
+trap cleanup EXIT
 git archive HEAD | tar -x -C "$STAGE"
-(cd "$STAGE" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
+case "${CHAT0110_BUILD_ON_SERVER:-0}" in
+  0) (cd "$STAGE" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null) ;;
+  1)
+    # На Mac остаются только архивирование и перенос готовых файлов.
+    REMOTE_STAGE=$(ssh "$SERVER" 'mktemp -d /tmp/chat0110-build.XXXXXXXX')
+    [[ "$REMOTE_STAGE" =~ ^/tmp/chat0110-build\.[A-Za-z0-9]+$ ]] || { REMOTE_STAGE=""; exit 1; }
+    rsync -a --delete "$STAGE/" "$SERVER:$REMOTE_STAGE/"
+    ssh "$SERVER" "cd '$REMOTE_STAGE' && nice -n 10 bun install --frozen-lockfile >/dev/null && nice -n 10 bun run build >/dev/null"
+    mkdir -p "$STAGE/apps/web/dist"
+    rsync -a --delete "$SERVER:$REMOTE_STAGE/apps/web/dist/" "$STAGE/apps/web/dist/"
+    ;;
+  *) echo 'CHAT0110_BUILD_ON_SERVER: допустимы только 0 и 1' >&2; exit 1 ;;
+esac
 
 # На сервер — только то, что нужно для запуска: сервер, протокол и собранный web.
 # Внешних зависимостей у сервера нет, поэтому вместо bun install на сервере —

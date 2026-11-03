@@ -123,7 +123,7 @@ bun run dev:web   # Vite UI
 2. Создать GitHub App с callback `/auth/callback`, webhook `/api/github/webhook`, правами Contents/Pull requests/Issues RW и Metadata R.
 3. `bash deploy/setup.sh`
 4. `bash deploy/configure.sh`
-5. `bash deploy/deploy.sh`
+5. `CHAT0110_BUILD_ON_SERVER=1 bash deploy/deploy.sh` — сборка на действующем сервере. Без переменной скрипт собирает локально.
 
 Секреты и серверная конфигурация не хранятся в репозитории.
 
