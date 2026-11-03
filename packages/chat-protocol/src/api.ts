@@ -11,6 +11,27 @@ export interface Me {
   avatar_url: string;
 }
 
+/** Человек, который хотя бы раз входил в chat.0110: только его можно позвать в чат. */
+export interface Person {
+  login: string;
+  name: string | null;
+  avatar_url: string;
+}
+
+export interface PeopleResponse {
+  people: Person[];
+}
+
+export interface InviteRequest {
+  login: string;
+}
+
+/** invited — GitHub отправил приглашение в репозиторий; member — доступ у человека уже был. */
+export interface InviteResponse {
+  login: string;
+  status: "invited" | "member";
+}
+
 export interface AppConfig {
   app_slug: string;
   install_url: string;

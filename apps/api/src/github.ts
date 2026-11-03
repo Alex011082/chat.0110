@@ -311,6 +311,20 @@ export class GitHubClient {
     };
   }
 
+  /**
+   * Приглашение в репозиторий с правом записи: доступ к чату — это доступ к
+   * репо. 201 — GitHub отправил письмо, 204 — доступ уже был. Звать может
+   * только админ репо, и у App должно быть право Administration (write).
+   */
+  async inviteCollaborator(repo: RepoRef, login: string): Promise<"invited" | "member"> {
+    const r = await this.request(
+      "PUT",
+      `${repoPath(repo)}/collaborators/${encodeURIComponent(login)}`,
+      { permission: "push" },
+    );
+    return r ? "invited" : "member";
+  }
+
   // ——— Чаты ———
 
   // Чат = PR из ветки chat/<id> этого же репо с блоком chat0110 в теле.

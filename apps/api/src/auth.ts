@@ -6,6 +6,7 @@ import { isLoginAllowed, type Config } from "./config.ts";
 import { HttpError } from "./errors.ts";
 import { GitHubClient, type Fetch } from "./github.ts";
 import { htmlPage } from "./html.ts";
+import type { People } from "./people.ts";
 import { exchangeToken, sessionFromTokens, readCookie, type SessionStore } from "./session.ts";
 
 const AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
@@ -15,6 +16,8 @@ export interface AuthDeps {
   sessions: SessionStore;
   fetch?: Fetch;
   now?: () => number;
+  /** Список вошедших: из него зовут людей в чат. */
+  people?: People;
 }
 
 function sameState(a: string, b: string): boolean {
@@ -104,6 +107,7 @@ export function createAuth(deps: AuthDeps) {
             clear,
           );
         }
+        deps.people?.remember(user, now());
         const session = sessionFromTokens(tokens, user, now());
         let next = "/";
         try {
