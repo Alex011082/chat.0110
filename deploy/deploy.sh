@@ -62,6 +62,16 @@ ssh "$SERVER" "set -euo pipefail
   sudo rm -rf $REL
   sudo mv $REL.incoming $REL
   PREVIOUS=\$(readlink -f /opt/chat0110/current)
+  # SQLite backup учитывает WAL и не требует остановки чатов.
+  sudo -u jarvis python3 -c '
+import pathlib, sqlite3
+root = pathlib.Path(\"/var/lib/chat0110\")
+backup = root / \"backups\" / \"$SHA\"
+backup.mkdir(mode=0o700, parents=True, exist_ok=True)
+for path in root.glob(\"*.sqlite\"):
+    with sqlite3.connect(path.as_uri() + \"?mode=ro\", uri=True) as source, sqlite3.connect(backup / path.name) as target:
+        source.backup(target)
+'
   sudo cp /etc/systemd/system/chat0110.service $REL/deploy/chat0110.service.previous
   if ! sudo cmp -s $REL/deploy/chat0110.service /etc/systemd/system/chat0110.service; then
     sudo install -m 644 -o root -g root $REL/deploy/chat0110.service /etc/systemd/system/chat0110.service
