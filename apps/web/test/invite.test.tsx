@@ -52,7 +52,7 @@ test("светлая шапка на компьютере: «+» стоит ме
   setLocale("ru");
   setDesign("light");
   const h = header(view(await demo(), { light: true, phone: false }));
-  const people = h.indexOf('aria-label="Участники и сведения о чате"');
+  const people = h.indexOf('aria-label="Открыть участника: alex011082 — Участник"');
   const plus = h.indexOf('aria-label="Пригласить в чат"');
   const more = h.indexOf('aria-label="Ещё"');
   expect(people).toBeGreaterThan(-1);
@@ -62,7 +62,7 @@ test("светлая шапка на компьютере: «+» стоит ме
   expect(h).not.toContain("Ссылка скопируется сразу");
 });
 
-test("телефон в светлом: та же шапка со стрелкой к списку и «+», язык — в закрытом «⋯»", async () => {
+test("телефон в светлом: отдельные участники и приглашение со стрелкой к списку", async () => {
   setLocale("ru");
   setDesign("light");
   const html = view(await demo(), { light: true, phone: true });
@@ -70,7 +70,7 @@ test("телефон в светлом: та же шапка со стрелко
   expect(h).toContain('aria-label="Список чатов"');
   expect(h).toContain('aria-label="Пригласить в чат"');
   expect(h).toContain('aria-haspopup="dialog"');
-  expect(h).toContain('aria-label="Участники и сведения о чате"');
+  expect(h).toContain('aria-label="Открыть участника: alex011082 — Участник"');
   expect(h).not.toContain("lang-switch");
 });
 

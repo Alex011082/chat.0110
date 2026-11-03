@@ -1,10 +1,8 @@
 import type { ReactNode } from "react";
-import { setDesign } from "../lib/design.ts";
 import { s } from "../strings.ts";
-import { ChatsIcon, GearIcon, PlusIcon, TreeIcon } from "../ui/icons.tsx";
+import { ChatsIcon, PlusIcon, TreeIcon } from "../ui/icons.tsx";
 import { cx, Mark } from "../ui/kit.tsx";
-import { LanguageSwitch } from "../ui/LanguageSwitch.tsx";
-import { Menu } from "../ui/Menu.tsx";
+import {GlobalSettings} from "./GlobalSettings.tsx";
 
 /**
  * Боковая колонка светлого дизайна: рельс прибора и список чатов в одной
@@ -33,7 +31,7 @@ export function LightSidebar({
   const icon =
     "flex size-8 items-center justify-center rounded-[8px] border-0 bg-transparent text-ink-2 hover:bg-screen hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent";
   return (
-    <nav aria-label={s.rail.label} className="flex h-dvh min-w-0 flex-col border-r border-line bg-rail">
+    <nav aria-label={s.rail.label} className="light-sidebar flex h-dvh min-w-0 flex-col border-r border-line bg-rail">
       <div className="flex shrink-0 items-center gap-1 px-4 pt-4 pb-2">
         <span className="flex items-end gap-1.5">
           <Mark cell={3} />
@@ -63,17 +61,7 @@ export function LightSidebar({
           {login.slice(0, 2).toUpperCase()}
         </span>
         <span className="min-w-0 flex-1 truncate text-key">{login}</span>
-        <Menu
-          label={s.design.settings}
-          trigger={<GearIcon />}
-          up
-          items={[
-            { kind: "node", node: <LanguageSwitch /> },
-            { kind: "link", label: s.design.plugins, href: "/plugins" },
-            { kind: "button", label: s.design.toDevice, onClick: () => setDesign("device") },
-            { kind: "button", label: s.rail.logout, onClick: onLogout },
-          ]}
-        />
+        <GlobalSettings login={login} onLogout={onLogout}/>
       </div>
     </nav>
   );

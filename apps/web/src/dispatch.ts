@@ -1,14 +1,23 @@
 import type { DispatchView } from "@chat0110/chat-protocol";
 import { ApiFailure, mockRequested } from "./api.ts";
+const demos=new Map<string,DispatchView>();
+export function demoDispatch(chatKey:string):DispatchView{
+ const key=chatKey.toLowerCase();let value=demos.get(key);
+ if(!value){value={sessions:[
+  {id:"demo-claude",alias:"клод",name:"Claude · demo",author:"claude",model:"sonnet",online:true,auto_enabled:true,delivery_ready:true},
+  {id:"demo-codex",alias:"кодекс",name:"Codex · demo",author:"codex",model:"sol",online:false,auto_enabled:true,delivery_ready:false}
+ ],chains:[]};demos.set(key,value);}
+ return structuredClone(value);
+}
+export function demoAutoReply(chatKey:string,target:{session_id?:string;author?:string;enabled:boolean}):DispatchView{
+ const value=demoDispatch(chatKey);
+ if(target.session_id)value.sessions=value.sessions.map(session=>session.id===target.session_id?{...session,auto_enabled:target.enabled,delivery_ready:target.enabled&&session.online}:session);
+ else value.auto_requests=[{author:target.author!,enabled:target.enabled}];
+ demos.set(chatKey.toLowerCase(),value);return structuredClone(value);
+}
 export async function dispatchRequest(chatKey: string, cancelId?: string): Promise<DispatchView> {
   if (mockRequested())
-    return {
-      sessions: [
-        { id: "demo-claude", alias: "клод", name: "Claude · demo", author: "claude", model: "sonnet", online: true },
-        { id: "demo-codex", alias: "кодекс", name: "Codex · demo", author: "codex", model: "sol", online: false },
-      ],
-      chains: [],
-    };
+    return demoDispatch(chatKey);
   const path = `/api/chats/${chatKey.split("/").map(encodeURIComponent).join("/")}/dispatch`;
   const r = await fetch(path, {
     credentials: "same-origin",

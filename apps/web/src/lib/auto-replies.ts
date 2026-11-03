@@ -4,6 +4,8 @@ import {
   type DispatchView,
 } from "@chat0110/chat-protocol";
 import { agentCards, participationTask } from "./agent-catalog.ts";
+import {mockRequested} from "../api.ts";
+import {demoAutoReply} from "../dispatch.ts";
 
 export type AutoReplyView = DispatchView & {
   chatgpt?: {
@@ -68,6 +70,7 @@ export async function setAutoReply(
   sessionId: string,
   enabled: boolean,
 ): Promise<AutoReplyView> {
+  if(mockRequested())return demoAutoReply(chatKey,{session_id:sessionId,enabled});
   const response = await fetch(
     `/api/chats/${chatKey.split("/").map(encodeURIComponent).join("/")}/auto-replies`,
     {
@@ -81,6 +84,7 @@ export async function setAutoReply(
   return response.json();
 }
 export async function setAuthorAutoReply(chatKey:string,author:string,enabled:boolean):Promise<AutoReplyView>{
+ if(mockRequested())return demoAutoReply(chatKey,{author:canonicalMention(author),enabled});
  const response=await fetch(`/api/chats/${chatKey.split("/").map(encodeURIComponent).join("/")}/auto-replies`,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({author:canonicalMention(author),enabled})});
  if(!response.ok)throw Error("auto-replies");return response.json();
 }

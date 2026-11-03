@@ -1,10 +1,11 @@
+import {ParticipantsBar} from "./ParticipantsBar.tsx";
 import { LanguageSwitch } from "../ui/LanguageSwitch.tsx";
-import type { MessageItem, Participant, TimelineResponse } from "@chat0110/chat-protocol";
+import type { MessageItem, TimelineResponse } from "@chat0110/chat-protocol";
 import { useMemo, type ReactNode } from "react";
 import { ApiFailure, errorText } from "../api.ts";
 import { lastForkable } from "../lib/fork.ts";
 import { chatRoute } from "../lib/route.ts";
-import { initials, plural } from "../lib/text.ts";
+import { plural } from "../lib/text.ts";
 import { ago } from "../lib/time.ts";
 import { countTimeline, type LocalEntry } from "../lib/timeline.ts";
 import { forms, s } from "../strings.ts";
@@ -13,7 +14,6 @@ import { Body, cx, Grille, Key, KeyLink, Lamp, Readout, RoundKey, Screen, type L
 import { ChevronIcon, DotsIcon } from "../ui/icons.tsx";
 import { Menu, type MenuItem } from "../ui/Menu.tsx";
 import { Composer } from "./Composer.tsx";
-import { InviteButton } from "./Invite.tsx";
 import type { DecisionHandler } from "./DecisionCard.tsx";
 import { Timeline } from "./Timeline.tsx";
 
@@ -61,7 +61,8 @@ interface ChatViewProps {
   onPropose: (() => void) | null;
   /** Светлый дизайн: тонкая шапка, участники и редкие действия за кнопками. */
   light?: boolean;
-  /** Короткое подтверждение сверху экрана: «ссылка скопирована», «приглашён». */
+  settings?: ReactNode;
+  /** Подтверждение приглашения или копирования ссылки. */
   onToast: (text: string) => void;
 }
 
@@ -123,40 +124,30 @@ export function ChatView(p: ChatViewProps) {
     },
     ...(p.onPropose ? [{ kind: "button" as const, label: s.header.propose, title: s.header.proposeHint, onClick: p.onPropose }] : []),
     { kind: "link", label: s.header.openInGitHub, href: chat.url, external: true },
-    // На компьютере язык — в «Настройках» боковой колонки; у телефона её нет.
-    ...(p.phone ? [{ kind: "node" as const, node: <LanguageSwitch /> }] : []),
   ];
+  const title = (
+    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <h1 className={cx("m-0 truncate leading-snug font-semibold tracking-[-0.01em]", p.phone ? "text-[18px]" : "text-[23px]")}>{chat.title}</h1>
+      <span className="flex min-w-0 items-center gap-1.5 text-cap text-ink-2" aria-live="polite">
+        <Lamp state={status.lamp} size={8} ring={false} />
+        <span className="truncate">{status.lamp === "act" ? status.text : s.header.phoneStatus(chat.number, p.phone ? (status.online ? s.header.phoneOnline : s.header.phoneOffline) : status.text)}</span>
+      </span>
+    </div>
+  );
+  const controls = <>
+    <ParticipantsBar chat={chat} limit={p.phone ? 3 : p.infoKnob ? 2 : 4} store={p.data.chat_store} phone={p.phone} onToast={p.onToast}/>
+    <button type="button" className="chat-details-button" onClick={p.onInfo} aria-expanded={p.infoOpen}>{s.info.label}</button>
+    <Menu label={s.design.more} trigger={<DotsIcon />} items={more} />
+  </>;
   const lightHeader = (
-    <header
-      className={cx(
-        "flex shrink-0 items-center border-b border-line",
-        p.phone ? "gap-1 pt-[max(8px,env(safe-area-inset-top))] pr-1.5 pb-2 pl-1" : "gap-3 px-5 py-3",
-      )}
-    >
-      {p.phone ? (
-        <button
-          type="button"
-          aria-label={s.header.back}
-          onClick={p.onBack}
-          className="flex size-9 shrink-0 items-center justify-center rounded-[8px] border-0 bg-transparent text-ink-2"
-        >
-          <ChevronIcon left size={22} />
-        </button>
-      ) : null}
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <h1 className={cx("m-0 truncate leading-snug font-semibold tracking-[-0.01em]", p.phone ? "text-[16px]" : "text-[17px]")}>{chat.title}</h1>
-        <span className="flex min-w-0 items-center gap-1.5 text-cap text-ink-2" aria-live="polite">
-          <Lamp state={status.lamp} size={8} ring={false} />
-          <span className="truncate">
-            {status.lamp === "act"
-              ? status.text
-              : s.header.phoneStatus(chat.number, p.phone ? (status.online ? s.header.phoneOnline : s.header.phoneOffline) : status.text)}
-          </span>
-        </span>
-      </div>
-      <ParticipantStack participants={chat.participants} expanded={p.infoOpen} onClick={p.onInfo} />
-      <InviteButton chat={chat} store={p.data.chat_store} phone={p.phone} onToast={p.onToast} />
-      <Menu label={s.design.more} trigger={<DotsIcon />} items={more} />
+    <header className={cx("light-chat-header", p.phone && "flex-wrap")}>
+      {p.phone ? <>
+        <div className="flex w-full items-center gap-2">
+          <button type="button" aria-label={s.header.back} onClick={p.onBack} className="settings-trigger shrink-0"><ChevronIcon left size={22}/></button>
+          {title}{p.settings}
+        </div>
+        <div className="flex w-full items-center justify-end gap-2">{controls}</div>
+      </> : <>{title}{controls}</>}
     </header>
   );
 
@@ -174,7 +165,7 @@ export function ChatView(p: ChatViewProps) {
     return (
       <div className="flex h-dvh flex-col bg-ground">
         <div className="flex min-h-0 flex-1 flex-col gap-3.5 px-3.5 pt-3.5 pb-3.5">
-          <Body as="header" className="flex items-center gap-2.5 px-3 pt-3 pb-[18px] plinth-7">
+          <Body as="header" className="flex flex-wrap items-center gap-2.5 px-3 pt-3 pb-[18px] plinth-7">
             <RoundKey glyph="‹" aria-label={s.header.back} onClick={p.onBack} />
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <h1 className="m-0 truncate text-section font-semibold tracking-[-0.01em]">{chat.title}</h1>
@@ -307,41 +298,5 @@ export function MainPlaceholder({
         {action ? <div className="pt-1">{action}</div> : null}
       </Body>
     </div>
-  );
-}
-
-/**
- * Участники стопкой кружков — кнопка светлой шапки. Открывает сведения о чате:
- * участников с автоответами, ссылку для агента, развилки и решения
- * (InfoColumn), которые в «приборе» стоят отдельной колонкой.
- */
-function ParticipantStack({ participants, expanded, onClick }: { participants: Participant[]; expanded: boolean; onClick: () => void }) {
-  const shown = participants.slice(0, 3);
-  const rest = participants.length - shown.length;
-  return (
-    <button
-      type="button"
-      aria-label={s.design.participants}
-      title={s.design.participants}
-      aria-expanded={expanded}
-      onClick={onClick}
-      className="flex h-9 shrink-0 items-center rounded-full border-0 bg-transparent py-1 pr-2.5 pl-1 hover:bg-screen"
-    >
-      {shown.map((m, i) => (
-        <span
-          key={m.author}
-          aria-hidden="true"
-          className={cx(
-            "flex size-7 items-center justify-center rounded-full text-[11px] font-semibold ring-2 ring-[var(--body)]",
-            m.is_agent ? "bg-screen text-ink" : "bg-knob-ink text-knob-ink-fg",
-            i > 0 && "-ml-1.5",
-          )}
-        >
-          {initials(m.author, m.display)}
-        </span>
-      ))}
-      {participants.length === 0 ? <span className="px-1 text-cap text-ink-2">{s.info.participants}</span> : null}
-      {rest > 0 ? <span className="ml-1.5 text-cap text-ink-2">+{rest}</span> : null}
-    </button>
   );
 }

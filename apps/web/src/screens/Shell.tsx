@@ -1,3 +1,4 @@
+import {GlobalSettings} from "./GlobalSettings.tsx";
 import { RefreshQueue } from "../lib/refresh.ts";
 import { checkPrivacy } from "../privacy.ts";
 import type { AppConfig, ChatActivation, ChatMigration, ChatSummary, Decision, GraphResponse, Me, MessageItem, RepoInfo, TimelineResponse } from "@chat0110/chat-protocol";
@@ -59,10 +60,9 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
   const layout = useLayout();
   const now = useNow();
   const phone = layout === "phone";
-  // Светлый дизайн меняет раскладку компьютера и планшета. У телефона список
-  // прежний в светлых цветах, а у чата — светлая шапка с «+» (lightDesign).
-  const lightDesign = useDesign() === "light";
-  const light = lightDesign && !phone;
+  // Светлый чат на телефоне сохраняет отдельную шапку и общие настройки.
+  const design = useDesign();
+  const light = design === "light" && !phone;
 
   const [repos, setRepos] = useState<RepoInfo[] | null>(null);
   const [activation, setActivation] = useState<ChatActivation | null>(null);
@@ -504,6 +504,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
     main = (
       <ChatView
         onLoadHistory={async()=>{if(chatKey)fullHistory.current.add(chatKey);await loadTimeline();}}
+        settings={<GlobalSettings login={me.login} onLogout={onLogout}/>}
         data={current.data}
         sync={current}
         local={local}
@@ -527,7 +528,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
         onDecide={decide}
         onDecision={onDecision}
         onPropose={current.data.chat_store === 2 || !current.data.chat.parent ? null : openPropose}
-        light={lightDesign}
+        light={design === "light"}
         onToast={setToast}
       />
     );
@@ -566,6 +567,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
 
   const info = current.data ? (
     <InfoColumn
+      showParticipants={design!=="light"}
       chat={current.data.chat}
       items={current.data.items}
       now={now}
@@ -577,7 +579,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       onJump={() => setInfoOpen(false)}
       onPropose={current.data.chat_store === 2 || !current.data.chat.parent ? null : openPropose}
       store={current.data.chat_store}
-      agentLink={!lightDesign}
+      agentLink={design !== "light"}
     />
   ) : null;
 
