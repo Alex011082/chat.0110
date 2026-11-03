@@ -1,5 +1,6 @@
+import {agentConnectionLabel,agentDeliveryState,agentSessionName} from "../lib/auto-replies.ts";
 import { PrivacyPanel } from "./PrivacyPanel.tsx";
-import { mentionRoute, resolveMention, suggestMentions, type DispatchView } from "@chat0110/chat-protocol";
+import { canonicalMention, mentionRoute, resolveMention, suggestMentions, type DispatchView } from "@chat0110/chat-protocol";
 import { dispatchRequest, dispatchText } from "../dispatch.ts";
 import type { MessageItem } from "@chat0110/chat-protocol";
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
@@ -128,16 +129,16 @@ export function Composer(p: ComposerProps) {
               className={`flex min-h-10 w-full items-center justify-between gap-2 rounded-lg border-0 px-3 text-left text-cap ${selected === index ? "bg-plate text-ink" : "bg-transparent text-ink-2"}`}
             >
               <span>
-                @{session.alias} · {session.name}
+                {agentSessionName(session)} · @{session.alias}
               </span>
-              <span>{session.online ? d.online : d.offline}</span>
+              <span>{agentConnectionLabel(session,dispatch!,s.locale === "en")}</span>
             </button>
           ))}
         </div>
       ) : null}
       {route.length > 0 &&
       !routingError &&
-      resolved.some((id) => !dispatch?.sessions.find((session) => session.id === id)?.online) ? (
+      resolved.some((id) => !!dispatch && (()=>{const session=dispatch.sessions.find(session=>session.id===id);return !session||agentDeliveryState(session,dispatch)==="waiting_transport";})()) ? (
         <span>
           {s.locale === "en"
             ? "The message will be saved and wait for the participant to connect."

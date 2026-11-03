@@ -431,7 +431,7 @@ export class GitHubClient {
   // forkSha — коммит ветвления дочернего чата: ниже него история родителя,
   // а не события этого чата. Merge-base с основной веткой остаётся пределом
   // обхода, если sha из тела PR вдруг не предок ветки.
-  async listBranchCommits(repo: RepoRef, defaultBranch: string, chatId: string, forkSha?: string): Promise<CommitInput[]> {
+  async listBranchCommits(repo: RepoRef, defaultBranch: string, chatId: string, forkSha?: string, limit?:number): Promise<CommitInput[]> {
     const branch = branchForChat(chatId);
     let mergeBase: string | null = null;
     try {
@@ -447,9 +447,9 @@ export class GitHubClient {
       // startsWith: в теле PR sha может быть сокращённым (протокол допускает от 7 символов).
       until: (c) => c.sha === mergeBase || (forkSha !== undefined && String(c.sha).startsWith(forkSha)),
       // Без merge-base обходим немного: иначе прочитали бы всю историю репо.
-      maxPages: mergeBase ? 50 : 3,
+      maxPages: limit ? 1 : mergeBase ? 50 : 3,
     });
-    const ordered = raw.reverse();
+    const ordered = (limit?raw.slice(0,limit):raw).reverse();
     const added = await mapLimit(ordered, 8, (c) => this.getCommitAdded(repo, c.sha));
     return ordered.map((c, i): CommitInput => ({
       sha: c.sha,

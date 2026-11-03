@@ -2,7 +2,7 @@ import type { AgentSession } from "@chat0110/chat-protocol";
 import { canonicalMention } from "@chat0110/chat-protocol";
 import { useState } from "react";
 import {
-  agentDeliveryState,
+  agentConnectionLabel,agentSessionName,
   setAutoReply,
   setAuthorAutoReply,
   type AutoReplyView,
@@ -31,7 +31,6 @@ export function ParticipantAutoReplies({
   const en = s.locale === "en";
   const [busy, setBusy] = useState("");
   const [error, setError] = useState(false);
-  const chatgpt = canonicalMention(author) === "chatgpt";
   const requested=view?.auto_requests?.find(row=>row.author===canonicalMention(author))?.enabled??false;
   const toggle = async (session: AgentSession) => {
     if (!canPush || busy) return;
@@ -60,7 +59,7 @@ export function ParticipantAutoReplies({
           <p className="m-0 text-cap text-ink-2">
             {en
               ? requested?"Waiting for the plugin · start requested":"Install the plugin once to receive new turns."
-              : requested?"Ожидаем плагин · включение запрошено":"Для новых ходов один раз подключи плагин."}
+              : requested?"Включение запрошено · сессия к этому чату ещё не подключена":"Участник есть в истории. Подключи сессию к этому чату."}
           </p>
           <Key disabled={!!busy} onClick={async()=>{if(busy)return;setBusy("author");setError(false);try{onChange(await setAuthorAutoReply(`${repo}/${chatId}`,author,!requested));}catch{setError(true);}finally{setBusy("");}}} className="self-start text-cap">
             {busy?(en?"Saving…":"Сохраняем…"):requested?(en?"Turn off automatic replies":"Выключить автоответы"):(en?"Turn on automatic replies":"Включить автоответы")}
@@ -68,33 +67,18 @@ export function ParticipantAutoReplies({
         </>
       ) : (
         sessions.map((session) => {
-          const deliveryState = agentDeliveryState(session, view);
+
           return (
             <div key={session.id} className="flex flex-col gap-2">
               {(
                 <span className="text-cap text-ink-2">
-                  {session.name} · @{session.alias}
+                  {agentSessionName(session)}
                 </span>
               )}
               <span role="status" className="text-cap text-ink-2">
-                {deliveryState === "working"
-                  ? en ? "Answering" : "Отвечает"
-                  : deliveryState === "waiting"
-                  ? en
-                    ? "Listening for addressed turns"
-                    : "Ожидает адресованные сообщения"
-                  : session.auto_enabled
-                    ? chatgpt
-                      ? en
-                        ? "Waiting for the ChatGPT subscription"
-                        : "Ожидаем подписку ChatGPT"
-                      : en
-                        ? "Enabled · waiting for a delivery channel"
-                        : "Включены · ждём канал доставки"
-                    : en
-                      ? "Automatic replies are off"
-                      : "Автоответы выключены"}
+                {agentConnectionLabel(session,view,en)}
               </span>
+              <span className="text-cap text-ink-2 [overflow-wrap:anywhere]">{en?"Address":"Обращение"}: @{session.alias}</span>
               <Key
                 onClick={() => void toggle(session)}
                 disabled={!!busy}

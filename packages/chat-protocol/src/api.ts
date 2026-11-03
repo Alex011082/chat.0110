@@ -130,6 +130,8 @@ export interface InheritedContext {
 }
 
 export interface TimelineResponse {
+  /** Первый экран ограничен; полная история запрашивается отдельно. */
+  history?: {has_more:boolean;limit:number;checking?:number;check_failed?:boolean};
   chat: ChatDetail;
   items: TimelineItem[];
   forks: ForkRef[];
