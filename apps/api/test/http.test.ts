@@ -12,6 +12,8 @@ import { SessionStore, importCookieKey, type SessionData } from "../src/session.
 import { SseHub } from "../src/sse.ts";
 import { FakeGitHub } from "./fake-github.ts";
 import { DispatchStore } from "../src/dispatch.ts";
+import { People } from "../src/people.ts";
+import { Database } from "bun:sqlite";
 
 const PUBLIC = "https://chat.0110.digital";
 const R = "/repos/Alex011082/chat.0110";
@@ -45,10 +47,11 @@ async function setup(opts: { blocked?: string; webDist?: string; privacy?: Priva
   const sessions = new SessionStore({ key: await importCookieKey(config.cookieKey), dev: false, clientId: "cid", clientSecret: "csec", fetch: fake.fetch });
   const hub = new SseHub();
   const dispatch = new DispatchStore(":memory:");
-  const app = await createApp({ privacy: opts.privacy ?? testPrivacy, config, fetch: fake.fetch, sessions, hub, dispatch, now: () => new Date("2026-10-23T10:02:03Z"), rand: () => "m3p8" });
+  const stateDb = new Database(":memory:");
+  const app = await createApp({ privacy: opts.privacy ?? testPrivacy, config, fetch: fake.fetch, sessions, hub, dispatch, stateDb, now: () => new Date("2026-10-23T10:02:03Z"), rand: () => "m3p8" });
   const session: SessionData = { uid: 7, login: "Alex011082", at: "ghu_x", rt: "ghr_x", exp: Date.now() + 3600_000, rexp: Date.now() + 86400_000 };
   const cookie = (await sessions.cookieFor(session)).split(";")[0]!;
-  return { app, fake, cookie, sessions, hub, dispatch };
+  return { app, fake, cookie, sessions, hub, dispatch, stateDb };
 }
 
 const get = (path: string, cookie?: string) => new Request(PUBLIC + path, cookie ? { headers: { cookie } } : {});
@@ -327,6 +330,72 @@ describe("маршруты", () => {
     const res = await app(get("/api/nope", cookie));
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ code: "not_found" });
+  });
+});
+
+describe("люди и приглашения", () => {
+  const CHAT = "/api/chats/Alex011082/chat.0110/20261023-k7q2";
+  const pull = { number: 1, title: "Chat", body: "<!-- chat0110\nchat_id: 20261023-k7q2\n-->", state: "open", draft: true, head: { ref: "chat/20261023-k7q2", sha: "h", repo: { full_name: repoBody.full_name } }, base: { ref: "main" }, user: { login: "Alex011082" } };
+
+  async function withPeople(opts: { blocked?: string } = {}) {
+    const ctx = await setup(opts);
+    const people = new People(ctx.stateDb);
+    people.remember({ id: 11, login: "sivanov", name: "Сергей Иванов", avatar_url: "a11" }, 1000);
+    people.remember({ id: 12, login: "serg-kim", name: "Сергей Ким", avatar_url: "a12" }, 2000);
+    people.remember({ id: 13, login: "petrov", name: null, avatar_url: "a13" }, 3000);
+    ctx.fake.on("GET", /\/pulls\?state=all&head=/, { body: [pull] });
+    return { ...ctx, people };
+  }
+
+  test("/api/me записывает вошедшего: он находится поиском у других", async () => {
+    const { app, cookie, stateDb } = await setup();
+    expect((await app(get("/api/me", cookie))).status).toBe(200);
+    expect(new People(stateDb).byLogin("alex011082")).toEqual({ login: "Alex011082", name: "Alex", avatar_url: "https://avatars.githubusercontent.com/u/7" });
+  });
+
+  test("поиск: от двух знаков, по имени кириллицей и по логину, без себя и закрытых логинов", async () => {
+    const { app, cookie, people } = await withPeople({ blocked: "serg-kim" });
+    people.remember({ id: 7, login: "Alex011082", name: "Сергей-тёзка", avatar_url: "a7" }, 4000);
+    const find = async (q: string) => (await (await app(get(`/api/people?q=${encodeURIComponent(q)}`, cookie))).json()).people.map((p: any) => p.login);
+    expect(await find("с")).toEqual([]);
+    expect(await find("СЕР")).toEqual(["sivanov"]);
+    expect(await find("@petr")).toEqual(["petrov"]);
+    expect((await app(get("/api/people?q=petr"))).status).toBe(401);
+  });
+
+  test("приглашение: 201 от GitHub — invited, 204 — member, право записи в репо", async () => {
+    const { app, cookie, fake } = await withPeople();
+    fake.on("PUT", `${R}/collaborators/sivanov`, { status: 201, body: { id: 1 } });
+    fake.on("PUT", `${R}/collaborators/petrov`, { status: 204 });
+    const a = await app(post(`${CHAT}/invite`, { login: "SIVANOV" }, { cookie }));
+    expect(a.status).toBe(200);
+    expect(await a.json()).toEqual({ login: "sivanov", status: "invited" });
+    expect(fake.find("PUT", `${R}/collaborators/sivanov`)[0]!.body).toEqual({ permission: "push" });
+    expect(await (await app(post(`${CHAT}/invite`, { login: "petrov" }, { cookie }))).json()).toEqual({ login: "petrov", status: "member" });
+  });
+
+  test("приглашение: не входивший и кривой логин — до GitHub; без сессии и Origin — отказ", async () => {
+    const { app, cookie, fake } = await withPeople();
+    const before = fake.calls.length;
+    const stranger = await app(post(`${CHAT}/invite`, { login: "nobody" }, { cookie }));
+    expect(stranger.status).toBe(404);
+    expect((await stranger.json()).error).toContain("не входил");
+    expect((await app(post(`${CHAT}/invite`, { login: "bad/login" }, { cookie }))).status).toBe(400);
+    expect(fake.calls.length).toBe(before);
+    expect((await app(post(`${CHAT}/invite`, { login: "sivanov" }))).status).toBe(401);
+    expect((await app(post(`${CHAT}/invite`, { login: "sivanov" }, { cookie, origin: "https://evil.example" }))).status).toBe(403);
+  });
+
+  test("приглашение: у App нет права — говорим, где его включить; не админ — отдельный текст", async () => {
+    const { app, cookie, fake } = await withPeople();
+    fake.on("PUT", `${R}/collaborators/sivanov`, { status: 403, body: { message: "Resource not accessible by integration" } });
+    fake.on("PUT", `${R}/collaborators/petrov`, { status: 403, body: { message: "Must have admin rights to Repository." } });
+    const noRight = await app(post(`${CHAT}/invite`, { login: "sivanov" }, { cookie }));
+    expect(noRight.status).toBe(403);
+    expect((await noRight.json()).error).toContain("Administration");
+    const notAdmin = await app(post(`${CHAT}/invite`, { login: "petrov" }, { cookie }));
+    expect(notAdmin.status).toBe(403);
+    expect((await notAdmin.json()).error).toContain("администратор");
   });
 });
 

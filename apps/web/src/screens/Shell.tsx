@@ -59,9 +59,10 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
   const layout = useLayout();
   const now = useNow();
   const phone = layout === "phone";
-  // Светлый дизайн меняет раскладку компьютера и планшета; телефон пока тот же,
-  // только в светлых цветах.
-  const light = useDesign() === "light" && !phone;
+  // Светлый дизайн меняет раскладку компьютера и планшета. У телефона список
+  // прежний в светлых цветах, а у чата — светлая шапка с «+» (lightDesign).
+  const lightDesign = useDesign() === "light";
+  const light = lightDesign && !phone;
 
   const [repos, setRepos] = useState<RepoInfo[] | null>(null);
   const [activation, setActivation] = useState<ChatActivation | null>(null);
@@ -526,7 +527,8 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
         onDecide={decide}
         onDecision={onDecision}
         onPropose={current.data.chat_store === 2 || !current.data.chat.parent ? null : openPropose}
-        light={light}
+        light={lightDesign}
+        onToast={setToast}
       />
     );
   } else if (route.chatId && current.error && current.error.code !== "network" && current.error.code !== "rate_limited") {
@@ -575,6 +577,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       onJump={() => setInfoOpen(false)}
       onPropose={current.data.chat_store === 2 || !current.data.chat.parent ? null : openPropose}
       store={current.data.chat_store}
+      agentLink={!lightDesign}
     />
   ) : null;
 

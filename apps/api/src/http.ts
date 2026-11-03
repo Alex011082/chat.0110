@@ -17,7 +17,9 @@ import {
   type ChatMigration,
   type CreateChatResponse,
   type DecisionResponse,
+  type InviteResponse,
   type Me,
+  type PeopleResponse,
   type PostMessageResponse,
 } from "@chat0110/chat-protocol";
 import { activateChat, activationStatus } from "./activate.ts";
@@ -39,7 +41,8 @@ import {
 } from "./chats.ts";
 import { isLoginAllowed, type Config } from "./config.ts";
 import { HttpError, badRequest, forbidden, notFound, unauthorized } from "./errors.ts";
-import { GitHubClient, createCaches, type Fetch, type GitHubCaches, type RepoRef } from "./github.ts";
+import { GitHubClient, GitHubError, createCaches, type Fetch, type GitHubCaches, type RepoRef } from "./github.ts";
+import { People } from "./people.ts";
 import { SessionStore, importCookieKey, type SessionData } from "./session.ts";
 import { SseHub, sseResponse, type ServerLike } from "./sse.ts";
 import { createStatic } from "./static.ts";
@@ -135,7 +138,8 @@ export async function createApp(deps: AppDeps): Promise<App> {
       clientSecret: config.clientSecret,
       fetch: fetcher,
     });
-  const auth = createAuth({ config, sessions, fetch: fetcher });
+  const people = new People(stateDb);
+  const auth = createAuth({ config, sessions, fetch: fetcher, people });
   const key = await importCookieKey(config.cookieKey);
   const oauth = new McpOAuth({ db: stateDb, key, publicUrl: config.publicUrl, sessions, config });
   const events = new McpEvents({ db: stateDb, key });
@@ -197,7 +201,18 @@ export async function createApp(deps: AppDeps): Promise<App> {
       if (path === "/api/me" && method === "GET") {
         const u = await gh.getUser();
         const me: Me = { login: u.login, id: u.id, name: u.name, avatar_url: u.avatar_url };
+        // Кто входил до появления списка, попадает в него при следующем открытии.
+        people.remember(u, Date.now());
         return json(200, me);
+      }
+      if (path === "/api/people" && method === "GET") {
+        const out: PeopleResponse = {
+          people: people.search(url.searchParams.get("q") ?? "", {
+            except: session.uid,
+            allowed: (login) => isLoginAllowed(config, login),
+          }),
+        };
+        return json(200, out);
       }
       if (path === "/api/repos" && method === "GET") return json(200, await gh.listRepos());
       if (path === "/api/activation" && method === "GET") {
@@ -256,6 +271,29 @@ export async function createApp(deps: AppDeps): Promise<App> {
           const limit=url.searchParams.get("limit");
           if(limit!==null&&limit!=="10")throw badRequest("Неверный размер первого экрана");
           return json(200, await getTimeline(gh, repo, chatId, privacy,{...(limit?{limit:10}:{}),cache:timelineCache,scope:String(session.uid)}));
+        }
+        if (rest.length === 1 && rest[0] === "invite" && method === "POST") {
+          const body = await readJson(req);
+          if (typeof body.login !== "string" || !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(body.login))
+            throw badRequest("Нужен логин GitHub");
+          const person = people.byLogin(body.login);
+          if (!person || !isLoginAllowed(config, person.login)) throw notFound("Этот человек ещё не входил в chat.0110");
+          await gh.getRepo(repo);
+          if (!(await gh.findChatPull(repo, chatId))) throw notFound("Чат не найден");
+          let status: InviteResponse["status"];
+          try {
+            status = await gh.inviteCollaborator(repo, person.login);
+          } catch (e) {
+            if (e instanceof GitHubError && e.ghStatus === 403 && /not accessible by integration/i.test(e.ghMessage))
+              throw forbidden(
+                "У приложения chat.0110 нет права приглашать в репозиторий. Владелец включает его на GitHub: настройки приложения → Repository permissions → Administration → Read and write.",
+              );
+            if (e instanceof GitHubError && e.ghStatus === 403) throw forbidden("Пригласить в репозиторий может только его администратор");
+            if (e instanceof GitHubError && e.ghStatus === 422) throw new HttpError(409, "conflict", "GitHub не принял приглашение");
+            throw e;
+          }
+          const out: InviteResponse = { login: person.login, status };
+          return json(200, out);
         }
         if (rest.length === 1 && rest[0] === "privacy" && method === "POST") {
           await gh.getRepo(repo);

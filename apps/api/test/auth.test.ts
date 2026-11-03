@@ -3,6 +3,8 @@ import { createAuth } from "../src/auth.ts";
 import { loadConfig } from "../src/config.ts";
 import { SessionStore, importCookieKey } from "../src/session.ts";
 import { FakeGitHub } from "./fake-github.ts";
+import { People } from "../src/people.ts";
+import { Database } from "bun:sqlite";
 
 const PUBLIC = "https://chat.0110.digital";
 
@@ -20,8 +22,9 @@ async function setup(over: Record<string, string> = {}, login = "Alex011082") {
     .on("POST", "/login/oauth/access_token", { body: { access_token: "ghu_x", expires_in: 28800, refresh_token: "ghr_x", refresh_token_expires_in: 15897600 } })
     .on("GET", "/user", { body: { login, id: 7, name: "Alex", avatar_url: "a" } });
   const sessions = new SessionStore({ key: await importCookieKey(config.cookieKey), dev: false, clientId: config.clientId, clientSecret: config.clientSecret, fetch: fake.fetch });
-  const auth = createAuth({ config, sessions, fetch: fake.fetch });
-  return { auth, fake, sessions };
+  const people = new People(new Database(":memory:"));
+  const auth = createAuth({ config, sessions, fetch: fake.fetch, people });
+  return { auth, fake, sessions, people };
 }
 
 const setCookies = (res: Response) => res.headers.getSetCookie();
@@ -60,6 +63,17 @@ describe("вход через GitHub", () => {
     expect(setCookies(res).some((c) => c.startsWith("__Host-chat0110_state=;"))).toBe(true);
     const got = await sessions.read(new Request(PUBLIC, { headers: { cookie: session.split(";")[0]! } }));
     expect(got?.session).toMatchObject({ uid: 7, login: "Alex011082", at: "ghu_x", rt: "ghr_x" });
+  });
+
+  test("callback запоминает вошедшего — его можно позвать в чат; закрытый логин не запоминается", async () => {
+    const { auth, people } = await setup();
+    const { state, cookie } = await startLogin(auth);
+    await auth.callback(new Request(`${PUBLIC}/auth/callback?code=abc&state=${state}`, { headers: { cookie } }));
+    expect(people.byLogin("alex011082")).toEqual({ login: "Alex011082", name: "Alex", avatar_url: "a" });
+    const closed = await setup({ CHAT0110_BLOCKED_LOGINS: "alex011082" });
+    const second = await startLogin(closed.auth);
+    await closed.auth.callback(new Request(`${PUBLIC}/auth/callback?code=abc&state=${second.state}`, { headers: { cookie: second.cookie } }));
+    expect(closed.people.byLogin("alex011082")).toBeNull();
   });
 
   test("возврат после установки App без state — на /auth/login, код не обменивается", async () => {
