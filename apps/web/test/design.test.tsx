@@ -68,3 +68,81 @@ test("боковая колонка светлого: новый чат и де�
   expect(html).not.toContain("Выйти");
   expect(html).not.toContain("Плагины ИИ");
 });
+
+// --- Шапка и лента светлого на демо-данных -------------------------------------
+
+import type { MessageItem, TimelineResponse } from "@chat0110/chat-protocol";
+import { createMockApi } from "../src/mock.ts";
+import { ChatView } from "../src/screens/ChatView.tsx";
+
+async function demoChat(): Promise<TimelineResponse> {
+  const data = await createMockApi("1").timeline("Alex011082/chat.0110", "20261023-k7q2");
+  // Один ответ агента делаем длинным: такие в светлом приходят свёрнутыми.
+  const items = data.items.map((it) => it);
+  const i = items.findIndex((it) => it.kind === "message" && (it as MessageItem).author === "codex");
+  items[i] = { ...(items[i] as MessageItem), text: "Длинный расчёт. ".repeat(60) };
+  return { ...data, items };
+}
+
+function view(data: TimelineResponse, light: boolean): string {
+  return renderToStaticMarkup(
+    <ChatView
+      data={data}
+      sync={{ syncedAt: Date.now(), error: null }}
+      local={[]}
+      me={{ login: "alex011082", display: "alex011082" }}
+      now={Date.now()}
+      phone={false}
+      infoKnob={false}
+      infoOpen={false}
+      onInfo={() => {}}
+      onBack={() => {}}
+      path="/Alex011082/chat.0110/20261023-k7q2"
+      reply={null}
+      focusTick={0}
+      onReply={() => {}}
+      onClearReply={() => {}}
+      onSend={() => {}}
+      onRetry={() => {}}
+      onAccept={async () => {}}
+      parentTitle={null}
+      onFork={() => {}}
+      onDecide={() => {}}
+      onDecision={async () => {}}
+      onPropose={null}
+      light={light}
+    />,
+  );
+}
+
+test("шапка светлого: участники — кнопкой, Fork и GitHub — в закрытом меню «⋯»", async () => {
+  setLocale("ru");
+  setDesign("light");
+  const html = view(await demoChat(), true);
+  const header = html.slice(0, html.indexOf("</header>"));
+  expect(header).toContain('aria-label="Участники и сведения о чате"');
+  expect(header).toContain('aria-label="Ещё"');
+  expect(header).toContain("PR #3 · на связи");
+  expect(html).not.toContain("Открыть в GitHub");
+  expect(header).not.toContain(">Fork</button>");
+});
+
+test("лента светлого: действия помечены для показа при наведении, длинный ответ агента свёрнут", async () => {
+  setLocale("ru");
+  setDesign("light");
+  const html = view(await demoChat(), true);
+  expect(html).toContain('class="msg-actions');
+  expect(html).toContain('class="msg-clamp"');
+  expect(html).toContain("Показать полностью");
+  // Подробности строки — во всплывающей подсказке времени, а не текстом.
+  expect(html).toMatch(/title="агент · [^"]*"/);
+});
+
+test("«прибор» на тех же данных — как был: крупная шапка, ничего не свёрнуто", async () => {
+  setLocale("ru");
+  setDesign("device");
+  const html = view(await demoChat(), false);
+  expect(html).toContain("Открыть в GitHub");
+  expect(html).not.toContain('class="msg-clamp"');
+  expect(html).not.toContain("Показать полностью");
+});

@@ -13,7 +13,7 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
 
 const KEY =
   "inline-flex items-center justify-center gap-2 min-h-10 rounded-full pb-[3px] text-key leading-tight text-center " +
-  "[text-wrap:balance] font-semibold no-underline " +
+  "font-semibold no-underline " +
   "select-none border-0 transition-[transform,box-shadow] duration-75 active:translate-y-px " +
   "disabled:opacity-55 disabled:active:translate-y-0 aria-disabled:opacity-55";
 const PLASTIC = "px-[18px] bg-body text-ink hover:text-ink plinth-3 active:plinth-1 disabled:active:plinth-3";
@@ -262,7 +262,7 @@ export function Grille({ width, height, className }: { width: number | string; h
       viewBox={`0 0 ${w} ${height}`}
       preserveAspectRatio="xMinYMid slice"
       aria-hidden="true"
-      className={cx("shrink-0 text-ink", className)}
+      className={cx("grille shrink-0 text-ink", className)}
     >
       <defs>
         <pattern id={id} width="10" height="10" patternUnits="userSpaceOnUse">

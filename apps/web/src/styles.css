@@ -436,7 +436,7 @@
 .max-h-dvh{max-height:var(--stage-height,100dvh)}
 .app-status-bar{box-sizing:border-box;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:max(6px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) 6px max(14px,env(safe-area-inset-left));border-bottom:1px solid var(--line);background:var(--rail);flex-shrink:0}
 .app-install-help summary{cursor:pointer;font-size:13px;line-height:1.4;min-height:40px;display:flex;align-items:center;text-decoration:underline;text-underline-offset:4px}
-.app-install-help p{max-width:36rem;font-size:14px;line-height:1.5;margin:8px 0 12px;color:var(--ink-2)}
+.app-install-help p{font-size:14px;line-height:1.5;margin:8px 0 12px;color:var(--ink-2)}
 @media(max-width:699px){textarea,input,select{font-size:16px}.app-stage{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}}
 
 /*
@@ -539,6 +539,7 @@
 /* Строки списка чатов в светлом: без карточек, подсветка при наведении. */
 :root[data-design="light"] .chat-row {
   background-color: transparent;
+  box-shadow: none;
   padding-top: 8px;
   padding-bottom: 8px;
 }
@@ -560,4 +561,16 @@
 }
 :root[data-design="light"] .avatar-ink {
   box-shadow: none;
+}
+/* «Решётка-динамик» — деталь прибора; в светлом её нет. */
+:root[data-design="light"] .grille {
+  display: none;
+}
+/* Переключатель языка: серая дорожка, выбранный язык — белая таблетка. */
+:root[data-design="light"] .lang-switch {
+  background-color: var(--screen);
+}
+:root[data-design="light"] .lang-switch [aria-pressed="true"] {
+  background-color: #ffffff;
+  box-shadow: 0 0 0 1px var(--line);
 }

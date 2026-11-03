@@ -3,7 +3,7 @@ export function LanguageSwitch() {
   const locale = getLocale();
   return (
     <div
-      className="inline-flex shrink-0 rounded-full bg-slot p-1 shadow-recess"
+      className="lang-switch inline-flex shrink-0 rounded-full bg-slot p-1 shadow-recess"
       role="group"
       aria-label={locale === "ru" ? "Язык интерфейса" : "Interface language"}
     >
