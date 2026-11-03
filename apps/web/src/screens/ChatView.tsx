@@ -222,7 +222,7 @@ export function MainPlaceholder({
       >
         {onBack ? <RoundKey glyph="‹" aria-label={s.header.back} onClick={onBack} /> : null}
         <h1 className={cx("m-0 font-semibold", phone ? "text-section" : "text-title tracking-[-0.03em]")}>{title}</h1>
-        {text ? <p className="m-0 max-w-[52ch] text-copy text-ink-2">{text}</p> : null}
+        {text ? <p className="m-0 text-copy text-ink-2">{text}</p> : null}
         {action ? <div className="pt-1">{action}</div> : null}
       </Body>
     </div>
