@@ -107,7 +107,7 @@ export function TreeView(p: TreeViewProps) {
     body = (
       <Plate className="flex flex-col items-start gap-2.5 px-6 pt-[22px] pb-7">
         <h2 className="m-0 text-copy font-semibold">{s.tree.empty.title}</h2>
-        <p className="m-0 max-w-[52ch] text-cap leading-[1.45] text-ink-2">{s.tree.empty.text}</p>
+        <p className="m-0 text-cap leading-[1.45] text-ink-2">{s.tree.empty.text}</p>
         {p.canCreate ? <Key onClick={p.onNew}>{s.empty.create}</Key> : null}
       </Plate>
     );
