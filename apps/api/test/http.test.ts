@@ -450,6 +450,7 @@ test("адресное сообщение проходит Claude → Codex → 
   };
   const a=await agent("register",{repo:"Alex011082/chat.0110",chat_id:chat,session_id:"claude-instance",alias:"claude-work",name:"Claude",author:"claude",model:"sonnet"});
   expect(a.version).toBe("2.1.0");
+  expect(a.capabilities.idempotent_next).toBe(true);
   const b=await agent("register",{repo:"Alex011082/chat.0110",chat_id:chat,session_id:"codex-instance",alias:"codex-work",name:"Codex",author:"codex",model:"sol"});
   const raw = "ghp_" + "ExampleOnlySecretValue123456789ABCD";
   const body={request_id:"unique-request-123",text:`@Клоду Проверь мобильную версию и обсуди с @@Соль. API_KEY=${raw}; anna@example.org`};
@@ -457,8 +458,10 @@ test("адресное сообщение проходит Claude → Codex → 
   expect(files.size).toBe(1);
   expect((await agent("next",{session_id:b.id})).task).toBeNull();
   for(const [index,sess] of [a,b,a].entries()) {
-    const {task}=await agent("next",{session_id:sess.id});
+    const request_id=`pull-request-${index}`;
+    const {task}=await agent("next",{session_id:sess.id,request_id});
     expect(task.step).toBe(index);
+    expect((await agent("next",{session_id:sess.id,request_id})).task).toMatchObject({id:task.id,claim:task.claim});
     expect((await agent("next",{session_id:sess.id})).task).toBeNull();
     const completion={session_id:sess.id,task_id:task.id,claim:task.claim,text:`Ответ ${index}; PASSWORD=example-secret-value; anna@example.org`};
     await agent("complete",completion);

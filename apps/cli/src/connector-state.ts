@@ -12,6 +12,7 @@ export interface SavedConnection {
   external: string;
   session: string | null;
   current: PendingTurn | null;
+  pull_id?: string;
 }
 /** Claim — локальный секрет: сохраняем приватно и не допускаем два процесса одной сессии. */
 export class ConnectorState {

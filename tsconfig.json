@@ -31,6 +31,7 @@
     "apps/cli/test/codex-tool-transport.test.ts",
     "apps/cli/test/native-mailbox.test.ts",
     "apps/cli/test/native-inbox.test.ts",
+    "apps/cli/test/native-service.test.ts",
     "apps/cli/test/connector-state.test.ts",
     "apps/cli/test/plugin-channel.test.ts",
     "scripts/build-plugins.ts"

@@ -51,6 +51,36 @@ test("чужой claim не завершает ход; отмена не буд�
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+test("повтор потерянного next возвращает прежний claim после restart, но не чужой или остановленный ход",()=>{
+  const dir=mkdtempSync(join(tmpdir(),"dispatch-pull-"));
+  let q=new DispatchStore(join(dir,"q.sqlite"));
+  try{
+    const a=q.register(7,"a/b","20261026-abcd","first","first","Claude","claude");
+    const b=q.register(7,"a/b","20261026-abcd","second","second","Claude","claude");
+    q.enqueue("pull-root",7,"a/b","20261026-abcd","message","question",[a.id]);
+    const first=q.claimRequest(a.id,"request-one")!;
+    expect(first.status).toBe("running");
+    q.close();q=new DispatchStore(join(dir,"q.sqlite"));
+    expect(q.claimRequest(a.id,"request-one")).toMatchObject({id:first.id,claim:first.claim});
+    expect(q.claimRequest(a.id,"request-other")).toBeNull();
+    expect(q.claimRequest(b.id,"request-one")).toBeNull();
+    q.setAutoEnabled(7,a.id,false);
+    expect(q.claimRequest(a.id,"request-one")).toBeNull();
+  }finally{q.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test("старый request_id next после завершения не забирает новое задание",()=>{
+  const q=new DispatchStore(":memory:");
+  try{
+    const a=q.register(7,"a/b","20261026-abcd","first","first","Claude","claude");
+    q.enqueue("pull-old",7,"a/b","20261026-abcd","old","question",[a.id]);
+    const t=q.claimRequest(a.id,"request-one")!;q.finish(t.id,t.claim!,"answer");
+    q.enqueue("pull-new",7,"a/b","20261026-abcd","new","question",[a.id]);
+    expect(q.claimRequest(a.id,"request-one")).toBeNull();
+    expect(q.claimRequest(a.id,"request-two")?.reply_to).toBe("new");
+  }finally{q.close();}
+});
+
 test("перезапуск сохраняет очередь и не выдаёт занятый ход заново", () => {
   const dir = mkdtempSync(join(tmpdir(), "dispatch-"));
   try {

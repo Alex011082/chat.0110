@@ -17,24 +17,31 @@ export function claudeInboxPath(target: ClaudeInboxTarget): string {
     throw new Error("Небезопасный inbox сессии");
   return meta.messagingSocketPath;
 }
-export function sendClaudeInbox(target: ClaudeInboxTarget, text: string, id: string): Promise<NativeSendResult> {
+export function sendClaudeInbox(target: ClaudeInboxTarget, text: string, id: string,signal?:AbortSignal): Promise<NativeSendResult> {
   const path = claudeInboxPath(target);
+  if(signal?.aborted)return Promise.resolve("not_sent");
   const frame = JSON.stringify({ type: "user", message: { role: "user", content: `CHAT0110 delivery ${id}\n${text}` } }) + "\n";
   return new Promise(resolve => {
-    let connected = false, settled = false;
+    let connected = false, settled = false,wrote=false;
     const socket = createConnection({ path });
     const finish = (result: NativeSendResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener("abort",onAbort);
       socket.destroy();
       resolve(result);
     };
     const timer = setTimeout(() => finish(connected ? "uncertain" : "not_sent"), 3000);
+    const onAbort=()=>finish(wrote?"uncertain":"not_sent");
     socket.on("error", () => finish(connected ? "uncertain" : "not_sent"));
     socket.on("connect", () => {
+      if(settled||signal?.aborted){onAbort();return;}
       connected = true;
+      wrote=true;
       socket.write(frame, error => finish(error ? "uncertain" : "sent_unconfirmed"));
     });
+    signal?.addEventListener("abort",onAbort,{once:true});
+    if(signal?.aborted)onAbort();
   });
 }

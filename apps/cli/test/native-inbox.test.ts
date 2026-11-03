@@ -2,6 +2,30 @@ import { test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { NativeDelivery } from "../src/native-delivery.ts";
 
+test("stop во время backoff не отправляет второй prompt; restart сохраняет известный отказ до отправки",async()=>{
+  const db=new Database(":memory:");const abort=new AbortController();const calls:boolean[]=[];
+  try{
+    const delivery=new NativeDelivery(db,async()=>{calls.push(abort.signal.aborted);return calls.length===1?"not_sent":"sent_unconfirmed";},async()=>{abort.abort();});
+    expect((await delivery.send("stop-retry","target","question",abort.signal)).state).toBe("queued");
+    expect(calls).toEqual([false]);
+    expect((await delivery.send("stop-retry","target","question")).state).toBe("sent_unconfirmed");
+    expect(calls).toHaveLength(2);
+  }finally{db.close();}
+});
+
+test("отмена цепочки между попытками запрещает новый вызов транспорта",async()=>{
+ const db=new Database(":memory:");const q=new DispatchStore(":memory:");let sends=0;
+ try{
+  const a=q.register(7,"a/b","20261026-abcd","first","first","Claude","claude");
+  q.enqueue("stop-between",7,"a/b","20261026-abcd","message","question",[a.id]);
+  const t=q.claim(a.id)!;
+  const delivery=new NativeDelivery(db,async()=>{sends++;return "not_sent";},async()=>q.cancel(7,"stop-between"));
+  const admit=async()=>{try{q.heartbeat(t.id,a.id,t.claim!);return true;}catch{return false;}};
+  expect((await delivery.send(t.id,a.id,"question",undefined,admit)).state).toBe("cancelled");
+  expect(sends).toBe(1);
+ }finally{q.close();db.close();}
+});
+
 test("native outbox не повторяет принятую или неоднозначную доставку после restart", async () => {
   const db = new Database(":memory:");
   let sends = 0;
@@ -46,6 +70,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, appendFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
+import { ConnectorState } from "../src/connector-state.ts";
 import { sendClaudeInbox } from "../src/claude-inbox.ts";
 
 test("отдельные transport-процессы с одной SQLite не отправляют один identity дважды", async () => {
@@ -106,14 +131,19 @@ test("потерянный ответ complete и restart повторяют с�
   } finally {q.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-test("runner связывает HTTP-очередь с inbox и восстанавливает потерянный complete без второго prompt", async () => {
+for (const scenario of [
+  {name:"пилот",repo:"Alex011082/Y-TNG",chat:"20261030-pp11",failures:0},
+  {name:"другой чат и временный HTTP 503",repo:"Alex011082/chat.0110",chat:"20261030-34jd",failures:2},
+  {name:"отдельный listener start/status/stop",repo:"Alex011082/chat.0110",chat:"20261030-34jd",failures:0,managed:true},
+  {name:"restart между записью claim и созданием job",repo:"Alex011082/chat.0110",chat:"20261030-34jd",failures:0,resumed:true},
+]) test(`runner: ${scenario.name}; один prompt и восстановление потерянного complete`, async () => {
   const dir=mkdtempSync(join(tmpdir(),"native-runner-"));
   const state=join(dir,"state"),socket=join(dir,"peer.sock"),meta=join(dir,"peer.json"),binding=join(dir,"binding.json");
   const cli=new URL("../src/native-desktop.ts",import.meta.url).pathname;
   const id="fixture-task-1";
   writeFileSync(join(dir,"gh"),"#!/bin/sh\nprintf 'fixture-access'\n");chmodSync(join(dir,"gh"),0o755);
   const env={...process.env,PATH:dir+":"+process.env.PATH};
-  let registered=0,issued=false,completes=0,prompts=0,contexts=0;
+  let registered=0,issued=false,completes=0,prompts=0,contexts=0,nextCalls=0;
   const git=new Map<string,string>();let peerError:unknown;
   const runHelper=async(a:string[])=>{
     const p=Bun.spawn([process.execPath,cli,...a],{env,stdout:"ignore",stderr:"ignore"});return p.exited;
@@ -121,9 +151,14 @@ test("runner связывает HTTP-очередь с inbox и восстана
   const api=Bun.serve({hostname:"127.0.0.1",port:0,async fetch(req){
     if(req.headers.get("authorization")!=="Bearer fixture-access")return new Response("",{status:401});
     const method=new URL(req.url).pathname.split("/").at(-1);const p=await req.json() as any;
-    if(method==="register"){registered++;return Response.json({id:"registered-fixture"});}
+    if(method==="register"){
+      expect(p.repo).toBe(scenario.repo);expect(p.chat_id).toBe(scenario.chat);
+      registered++;return Response.json({id:"registered-fixture",version:"2.1.0",capabilities:{idempotent_next:true}});
+    }
     if(method==="next"){
-      if(!issued){issued=true;return Response.json({task:{id,claim:"fixture-claim"},prompt:"fixture question",repo:"Alex011082/Y-TNG",chat_id:"20261030-pp11",final:true,expires_at:Date.now()+900_000});}
+      nextCalls++;
+      if(nextCalls<=scenario.failures)return Response.json({error:"temporary"},{status:503});
+      if(!issued){issued=true;return Response.json({task:{id,claim:"fixture-claim"},prompt:"fixture question",repo:scenario.repo,chat_id:scenario.chat,final:true,expires_at:Date.now()+900_000});}
       await Bun.sleep(100);return Response.json({task:null});
     }
     if(method==="context"){contexts++;return Response.json({items:[]});}
@@ -157,11 +192,34 @@ test("runner связывает HTTP-очередь с inbox и восстана
   try{
     await new Promise<void>(resolve=>peer.listen(socket,resolve));chmodSync(socket,0o600);
     writeFileSync(meta,JSON.stringify({sessionId:"fixture",hostSessionId:"fixture-host",entrypoint:"claude-desktop",version:"2.1.309",peerProtocol:1,messagingSocketPath:socket}));
-    writeFileSync(binding,JSON.stringify({target:{metadata:meta,sessionId:"fixture",hostSessionId:"fixture-host"},repo:"Alex011082/Y-TNG",chat_id:"20261030-pp11",alias:"fixture-claude",name:"Fixture",url:`http://127.0.0.1:${api.port}`}));
-    runner=Bun.spawn([process.execPath,cli,"listen","--state",state,"--binding",binding],{env,stdout:"ignore",stderr:"ignore"});
+    writeFileSync(binding,JSON.stringify({target:{metadata:meta,sessionId:"fixture",hostSessionId:"fixture-host"},repo:scenario.repo,chat_id:scenario.chat,alias:"fixture-claude",name:"Fixture",url:`http://127.0.0.1:${api.port}`}),{mode:0o600});
+    if("resumed" in scenario){
+      const saved=new ConnectorState(state,"native-listener");
+      saved.value.session="registered-fixture";
+      saved.value.current={task:{id,claim:"fixture-claim"},session_id:"registered-fixture",prompt:"fixture question",repo:scenario.repo,chat_id:scenario.chat,final:true,expires_at:Date.now()+900_000};
+      saved.save();saved.close();issued=true;
+    }
+    runner=Bun.spawn([process.execPath,cli,"managed" in scenario?"start":"listen","--state",state,"--binding",binding],{env,stdout:"ignore",stderr:"ignore"});
+    if("managed" in scenario)expect(await runner.exited).toBe(0);
     const until=Date.now()+10_000;
     while(!existsSync(join(state,`${id}.done.json`)) && !peerError && Date.now()<until)await Bun.sleep(20);
     expect(peerError).toBeUndefined();expect(existsSync(join(state,`${id}.done.json`))).toBe(true);
     expect(registered).toBe(1);expect(contexts).toBe(1);expect(prompts).toBe(1);expect(completes).toBe(2);expect(git.size).toBe(1);
-  }finally{runner?.kill();if(runner)await runner.exited;api.stop(true);peer.close();rmSync(dir,{recursive:true,force:true});}
+    if(!("resumed" in scenario))expect(nextCalls).toBeGreaterThan(scenario.failures);
+    if("managed" in scenario){
+      expect(await runHelper(["start","--state",state,"--binding",binding])).toBe(0);
+      expect(await runHelper(["status","--state",state])).toBe(0);
+      expect(registered).toBe(1);expect(prompts).toBe(1);
+    }
+  }finally{
+    if("managed" in scenario){
+      await runHelper(["stop","--state",state]);
+      const until=Date.now()+3000;
+      while(Date.now()<until){
+        if(existsSync(join(state,"status.json"))&&JSON.parse(readFileSync(join(state,"status.json"),"utf8")).state==="stopped")break;
+        await Bun.sleep(30);
+      }
+    }
+    runner?.kill();if(runner)await runner.exited;api.stop(true);peer.close();rmSync(dir,{recursive:true,force:true});
+  }
 },15000);
