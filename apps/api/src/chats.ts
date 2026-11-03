@@ -58,6 +58,7 @@ import { GitHubError, mapLimit, type ChatPull, type GhRepo, type GitHubClient, t
 
 import { defaultPrivacy, type Privacy } from "./privacy.ts";
 import { cleanConversationFile } from "./privacy-files.ts";
+import type {TimelineCache} from "./timeline-cache.ts";
 
 export interface ChatCtx {
   privacy?: Privacy;
@@ -138,7 +139,7 @@ export async function requireOpenChat(gh: GitHubClient, repo: RepoRef, chatId: s
 
 // Сырые данные одного чата для buildTimeline. Общая часть ленты и Fork:
 // точку ветвления ищем ровно в тех коммитах и комментариях, что видит человек.
-async function loadTimelineInput(gh: GitHubClient, repo: RepoRef, info: GhRepo, pull: ChatPull): Promise<{ input: TimelineInput; meta: ChatMeta | null; store: ChatStore }> {
+async function loadTimelineInput(gh: GitHubClient, repo: RepoRef, info: GhRepo, pull: ChatPull, limit?:number): Promise<{ input: TimelineInput; meta: ChatMeta | null; store: ChatStore; hasMore:boolean; fileMessages:MessageItem[] }> {
   const { chatId } = pull;
   const ref = branchForChat(chatId);
   const store = await gh.chatStore(repo, ref);
@@ -147,18 +148,23 @@ async function loadTimelineInput(gh: GitHubClient, repo: RepoRef, info: GhRepo, 
     gh.getDecisionFiles(repo, chatId, ref),
     // У дочернего чата ветка растёт из ветки родителя: коммиты до точки Fork —
     // история родителя, она приходит отдельно, как inherited.
-    gh.listBranchCommits(repo, info.default_branch, chatId, pull.parent?.commit_sha),
+    gh.listBranchCommits(repo, info.default_branch, chatId, pull.parent?.commit_sha,limit),
     gh.listComments(repo, pull.number),
     gh.listReviews(repo, pull.number),
     gh.listReviewComments(repo, pull.number),
     gh.listAgentPulls(repo, chatId),
     gh.getFileText(repo, chatJsonPath(chatId, store), ref),
   ]);
-  const files = await mapLimit(entries, 8, async (e) => ({ name: e.name, content: await gh.getBlob(repo, e.sha) }));
+  const selected=limit?[...entries].sort((a,b)=>a.name.localeCompare(b.name)).slice(-limit):entries;
+  const files = await mapLimit(selected, 8, async (e) => ({ name: e.name, content: await gh.getBlob(repo, e.sha) }));
   return {
     input: { chatId, files, commits, comments, reviews, reviewComments, agentPrs, decisions },
     meta: chatJson === null ? null : parseChatJson(chatJson),
     store,
+    hasMore:!!limit&&(entries.length>limit||commits.length>=limit||comments.length>limit||reviews.length>limit||reviewComments.length>limit),
+    // Имена файлов — метаданные протокола, как в графе. Состав участников
+    // не зависит от того, сколько старых текстов открыто на экране.
+    fileMessages:entries.flatMap(e=>{const id=e.name.replace(/\.md$/,""),p=parseMessageId(id);return p?[{kind:"message" as const,id,author:p.author,display:displayName(p.author),source:"file" as const,text:"",created_at:p.date,pending:false}]:[];}),
   };
 }
 
@@ -197,22 +203,27 @@ async function outgoingOf(gh: GitHubClient, repo: RepoRef, chatId: string, paren
   return foldFiles(await gh.getDecisionFiles(repo, parentId)).filter((d) => d.from_chat === chatId);
 }
 
-export async function getTimeline(gh: GitHubClient, repo: RepoRef, chatId: string, privacy: Privacy = defaultPrivacy): Promise<TimelineResponse> {
+export async function getTimeline(gh: GitHubClient, repo: RepoRef, chatId: string, privacy: Privacy = defaultPrivacy, options:{limit?:number;cache?:TimelineCache;scope?:string}={}): Promise<TimelineResponse> {
   const [info, pull] = await findPull(gh, repo, chatId);
-  const [{ input, meta, store }, chats] = await Promise.all([loadTimelineInput(gh, repo, info, pull), gh.listChatPulls(repo)]);
-  const items = buildTimeline(input);
+  // Проверка доступа и головы PR обязательна даже при попадании в снимок.
+  const revision=`${pull.headSha}:${pull.updatedAt}`,scope=`${options.scope}/${info.full_name.toLowerCase()}/${chatId}/${options.limit??"all"}`;
+  const build=async():Promise<TimelineResponse>=>{
+  const [{ input, meta, store,hasMore,fileMessages }, chats] = await Promise.all([loadTimelineInput(gh, repo, info, pull,options.limit), gh.listChatPulls(repo)]);
+  const allItems = buildTimeline(input),items=options.limit?allItems.slice(-options.limit):allItems;
   // Источник истины — chat.json; тело PR — запасной путь (chat.json битый или его нет).
   const parent = meta?.parent ?? pull.parent;
   const [inherited, outgoing] = await Promise.all([
     parent ? readInherited(gh, repo, chatId, parent, chats, store) : null,
     parent ? outgoingOf(gh, repo, chatId, parent.chat_id) : [],
   ]);
-  return privacy.object({
+  const moreInherited=!!options.limit&&!!inherited&&inherited.items.length>options.limit;
+  if(options.limit&&inherited&&inherited.items.length>options.limit)inherited.items=inherited.items.slice(-options.limit);
+  const raw:TimelineResponse={
     chat: {
       ...summaryOf(info.full_name, pull),
       head_sha: pull.headSha,
       meta,
-      participants: participantsOf(items),
+      participants: participantsOf([...allItems,...fileMessages.filter(file=>!allItems.some(item=>item.id===file.id))]),
       can_push: info.can_push,
     },
     items,
@@ -221,7 +232,34 @@ export async function getTimeline(gh: GitHubClient, repo: RepoRef, chatId: strin
     decisions: foldFiles(input.decisions ?? []),
     outgoing,
     chat_store: store,
+    ...(options.limit?{history:{has_more:hasMore||moreInherited||allItems.length>options.limit,limit:options.limit}}:{}),
+  };
+  if(!options.limit||!options.cache)return privacy.object(raw);
+  // Медленный новый текст не блокирует уже проверенные соседние сообщения.
+  // До завершения сканера его нет ни в HTTP, ни в зашифрованном снимке.
+  const safe:TimelineResponse=await privacy.object({...raw,items:[],inherited:inherited?{...inherited,items:[]}:null});
+  const pending=[...items.map(item=>({item,parent:false})),...(inherited?.items??[]).map(item=>({item,parent:true}))].reverse();
+  safe.history={...raw.history!,checking:pending.length};
+  const cache=options.cache;
+  cache.background(scope,revision,async()=>{
+    await Promise.all(pending.map(async row=>{
+      try{
+        const item=await privacy.object(row.item);
+        if(row.parent){safe.inherited!.items.push(item as MessageItem);safe.inherited!.items.sort(byTimeThenId);}
+        else {safe.items.push(item);safe.items.sort(byTimeThenId);}
+      }catch{safe.history!.check_failed=true;}
+      finally{safe.history!.checking!--;cache.put(scope,revision,safe);}
+    }));
   });
+  return safe;
+  };
+  if(!options.cache||!options.scope)return build();
+  const hit=options.cache.get(scope,revision);
+  if(hit){
+    if(options.cache.due(scope,revision)||(hit.history?.checking&&!options.cache.active(scope,revision)))void options.cache.load(scope,revision,build).catch(()=>{});
+    return {...hit,chat:{...hit.chat,can_push:info.can_push}};
+  }
+  return options.cache.load(scope,revision,build);
 }
 
 function graphDecision(d: Decision): GraphDecision {

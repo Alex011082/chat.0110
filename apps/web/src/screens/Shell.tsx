@@ -142,6 +142,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
 
   // --- Лента открытого чата ----------------------------------------------------------
   const tlSeq = useRef(0);
+  const fullHistory=useRef(new Set<string>());
   const tlRefresh = useRef(new RefreshQueue());
   const activeChatKey = useRef(chatKey);
   activeChatKey.current = chatKey;
@@ -153,7 +154,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       if (activeChatKey.current !== chatKey) return;
       const seq = ++tlSeq.current;
       try {
-        const data = await api().timeline(repoFull, chatId);
+        const data = await api().timeline(repoFull, chatId,!fullHistory.current.has(chatKey)&&!location.hash);
         if (seq !== tlSeq.current || activeChatKey.current !== chatKey) return;
         setTl({ key: chatKey, data, error: null, syncedAt: Date.now() });
       } catch (e) {
@@ -167,6 +168,16 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
     setInfoOpen(false);
     if (chatKey) void loadTimeline();
   }, [chatKey, loadTimeline]);
+  useEffect(()=>{
+    const revealTarget=()=>{if(!chatKey||!location.hash||document.getElementById(decodeURIComponent(location.hash.slice(1))))return;fullHistory.current.add(chatKey);void loadTimeline();};
+    window.addEventListener("hashchange",revealTarget);
+    return ()=>window.removeEventListener("hashchange",revealTarget);
+  },[chatKey,loadTimeline]);
+  useEffect(()=>{
+    if(!tl.data?.history?.checking||tl.key!==chatKey)return;
+    const timer=setTimeout(()=>void loadTimeline(),1500);
+    return ()=>clearTimeout(timer);
+  },[tl,chatKey,loadTimeline]);
 
   const current = tl.key === chatKey ? tl : NO_TIMELINE;
 
@@ -491,6 +502,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
   if (current.data) {
     main = (
       <ChatView
+        onLoadHistory={async()=>{if(chatKey)fullHistory.current.add(chatKey);await loadTimeline();}}
         data={current.data}
         sync={current}
         local={local}

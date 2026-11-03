@@ -72,7 +72,7 @@ export interface Api {
   migration(repo: string): Promise<ChatMigration>;
   migrate(repo: string): Promise<ChatMigration>;
   chats(repo: string): Promise<ChatSummary[]>;
-  timeline(repo: string, chatId: string): Promise<TimelineResponse>;
+  timeline(repo: string, chatId: string, recent?:boolean): Promise<TimelineResponse>;
   createChat(req: CreateChatRequest): Promise<CreateChatResponse>;
   postMessage(repo: string, chatId: string, req: PostMessageRequest): Promise<PostMessageResponse>;
   acceptAgentPr(repo: string, chatId: string, number: number): Promise<AcceptAgentPrResponse>;
@@ -195,7 +195,7 @@ export const httpApi: Api = {
   migration: (repo) => request<ChatMigration>("GET", `/api/migration?repo=${encodeURIComponent(repo)}`),
   migrate: (repo) => request<ChatMigration>("POST", "/api/migration", { repo }),
   chats: async (repo) => listOf<ChatSummary>(await request("GET", `/api/chats?repo=${encodeURIComponent(repo)}`), "chats"),
-  timeline: (repo, chatId) => request<TimelineResponse>("GET", chatPath(repo, chatId)),
+  timeline: (repo, chatId, recent) => request<TimelineResponse>("GET", chatPath(repo, chatId)+(recent?"?limit=10":"")),
   createChat: (req) => request<CreateChatResponse>("POST", "/api/chats", req),
   postMessage: (repo, chatId, req) => request<PostMessageResponse>("POST", `${chatPath(repo, chatId)}/messages`, req),
   acceptAgentPr: (repo, chatId, n) =>

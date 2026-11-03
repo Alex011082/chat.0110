@@ -506,9 +506,10 @@ export function createMockApi(mode: string): Api {
       if (mode === "nochats" || repo.toLowerCase() !== REPO.toLowerCase()) return [];
       return structuredClone(db.chats);
     },
-    async timeline(_repo, chatId) {
+    async timeline(_repo, chatId,recent) {
       await wait(300);
-      return timeline(chatId);
+      const data=timeline(chatId);
+      return recent?{...data,items:data.items.slice(-10),history:{has_more:data.items.length>10,limit:10}}:data;
     },
     async graph(repo) {
       await wait(350);

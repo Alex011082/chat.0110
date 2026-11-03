@@ -8,6 +8,9 @@ import {
 import { HttpError } from "../src/errors.ts";
 import { GitHubClient, createCaches } from "../src/github.ts";
 import { FakeGitHub, b64 } from "./fake-github.ts";
+import {Database} from "bun:sqlite";
+import {TimelineCache} from "../src/timeline-cache.ts";
+import {Privacy} from "../src/privacy.ts";
 
 const R = "/repos/Alex011082/chat.0110";
 const REPO = { owner: "Alex011082", name: "chat.0110" };
@@ -178,6 +181,47 @@ describe("лента чата", () => {
     expect(safe).not.toContain("private@example.org");
     expect(safe).toContain("[SECRET_1]");
     expect(fake.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+  test("первый экран не читает старые блобы и подробности всех коммитов; полная история доступна отдельно",async()=>{
+    const fake=timelineFake(),gh=ctx(fake).gh;
+    const recent=await getTimeline(gh,REPO,CHAT,testPrivacy,{limit:1});
+    expect(recent.history?.has_more).toBe(true);
+    expect(recent.items).toHaveLength(1);
+    expect(recent.chat.participants.map(p=>p.author)).toContain("claude");
+    expect(recent.chat.participants.map(p=>p.author)).toContain("alex011082");
+    expect(fake.find("GET",/\/git\/blobs\/sA/)).toHaveLength(0);
+    expect(fake.find("GET",/\/commits\/c1/)).toHaveLength(0);
+    const full=await getTimeline(gh,REPO,CHAT,testPrivacy);
+    expect(full.items.length).toBeGreaterThan(1);
+    expect(full.items.some(i=>i.kind==="message"&&i.id===A)).toBe(true);
+  });
+  test("повторное открытие берёт очищенный снимок, но заново проверяет доступ",async()=>{
+    const fake=timelineFake(),gh=ctx(fake).gh,cache=new TimelineCache(new Database(":memory:"),new Uint8Array(32));
+    const first=await getTimeline(gh,REPO,CHAT,testPrivacy,{cache,scope:"7"});
+    const calls=fake.calls.length;
+    expect(await getTimeline(gh,REPO,CHAT,testPrivacy,{cache,scope:"7"})).toEqual(first);
+    expect(fake.calls.slice(calls).map(c=>c.url)).toHaveLength(2);
+    fake.on("GET",R,{status:403,body:{message:"Forbidden"}});
+    await expect(getTimeline(gh,REPO,CHAT,testPrivacy,{cache,scope:"7"})).rejects.toThrow();
+  });
+  test("медленная проверка одного сообщения не блокирует очищенных соседей и не раскрывает исходник",async()=>{
+    const fake=timelineFake(),gh=ctx(fake).gh,cache=new TimelineCache(new Database(":memory:"),new Uint8Array(32));
+    let release!:()=>void;const gate=new Promise<void>(r=>release=r);
+    const privacy=new Privacy(async text=>{if(text.includes("Вакуум"))await gate;return [];});
+    try{
+      const first=await getTimeline(gh,REPO,CHAT,privacy,{cache,scope:"7",limit:10});
+      expect(first.history!.checking).toBeGreaterThan(0);
+      expect(JSON.stringify(first)).not.toContain("Вакуум");
+      await Bun.sleep(20);
+      const partial=await getTimeline(gh,REPO,CHAT,privacy,{cache,scope:"7",limit:10});
+      expect(partial.items.some(i=>i.kind==="message"&&i.text==="Комментарием.")).toBe(true);
+      expect(JSON.stringify(partial)).not.toContain("Вакуум");
+      expect(partial.history!.checking).toBe(1);
+      release();await Bun.sleep(20);
+      const done=await getTimeline(gh,REPO,CHAT,privacy,{cache,scope:"7",limit:10});
+      expect(done.history!.checking).toBe(0);
+      expect(done.items.some(i=>i.kind==="message"&&i.text==="Вакуум.")).toBe(true);
+    }finally{release();}
   });
   test("собирает TimelineInput из GitHub и отдаёт ленту с участниками", async () => {
     const fake = timelineFake();

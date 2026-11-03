@@ -123,8 +123,10 @@ export class McpEvents {
   }
 
   status(connectionId: string): { connected: boolean; last_error: string | null } {
-    const error = this.db.query<{ last_error: string | null }, [string]>("SELECT last_error FROM mcp_event_subscriptions WHERE connection_id=? ORDER BY expires_at DESC LIMIT 1").get(connectionId);
-    return { connected: this.hasActive(connectionId), last_error: error?.last_error ?? null };
+    const current = this.db.query<{ last_error: string | null }, [string, number]>("SELECT last_error FROM mcp_event_subscriptions WHERE connection_id=? AND active=1 AND expires_at>? ORDER BY expires_at DESC LIMIT 1").get(connectionId, this.now());
+    const latest = current ?? this.db.query<{ last_error: string | null }, [string]>("SELECT last_error FROM mcp_event_subscriptions WHERE connection_id=? ORDER BY expires_at DESC LIMIT 1").get(connectionId);
+    // Подписка нужна для повторов даже после сбоя; зелёный статус — отдельное обещание.
+    return { connected: !!current && !current.last_error, last_error: latest?.last_error ?? null };
   }
 
   // Только сохраняет событие. Сеть выполняет flush после повторной авторизации.

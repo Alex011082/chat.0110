@@ -2,11 +2,27 @@ import {test,expect} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
 import {ParticipantAutoReplies} from "../src/screens/ParticipantAutoReplies.tsx";
 import {setLocale} from "../src/strings.ts";
+import {agentConnectionLabel} from "../src/lib/auto-replies.ts";
+import {ConnectAgents} from "../src/screens/ConnectAgents.tsx";
 
 test("исторический участник получает настоящую кнопку в чате, без ссылки на connect или popup",()=>{
  setLocale("ru");
  const html=renderToStaticMarkup(<ParticipantAutoReplies author="claude" sessions={[]} view={{sessions:[],chains:[],auto_requests:[]}} repo="a/b" chatId="20261031-abcd" canPush onChange={()=>{}}/>);
- expect(html).toContain("<button");expect(html).toContain("Включить автоответы");expect(html).not.toContain("href=\"/connect");
+ expect(html).toContain("<button");expect(html).toContain("Включить автоответы");expect(html).not.toMatch(/<a[^>]*>Включить автоответы<\/a>/);
+ expect(html).toContain("Настроить подключение");
+});
+test("готовность приёмника важнее недавней активности и относится к конкретному чату",()=>{
+ const view={sessions:[],chains:[]},session={id:"one",author:"claude",name:"Claude Code",alias:"claude-one",auto_enabled:true,online:true,delivery_ready:false} as any;
+ expect(agentConnectionLabel(session,view,false)).toContain("приёмник этого чата не подключён");
+ expect(agentConnectionLabel({...session,online:false,delivery_ready:true},view,false)).toBe("Подключён к этому чату");
+});
+test("мастер сразу содержит точную привязку, MCP-команду и запрос участия",()=>{
+ setLocale("ru");
+ const html=renderToStaticMarkup(<ConnectAgents embedded chatContext={{repo:"owner/product",chat_id:"20261103-abcd"}} initialClient="claude-code"/>);
+ expect(html).toContain("owner/product");expect(html).toContain("20261103-abcd");
+ expect(html).toContain("chat0110 setup --client claude-code");
+ expect(html).toContain("Скопировать запрос для этой сессии");
+ expect(html).not.toContain("Скачать Claude Code");
 });
 test("сохранённое включение без клиента честно показывает ожидание плагина",()=>{
  setLocale("en");

@@ -3,7 +3,8 @@ import {dirname,join} from "node:path";
 import {spawnSync} from "node:child_process";
 import {createHash} from "node:crypto";
 
-const root=resolveRoot(),version="0.3.0",downloads=join(root,"apps/web/public/downloads");
+import {MCP_PACKAGE_VERSION} from "../packages/chat-protocol/src/mcp-install.ts";
+const root=resolveRoot(),version=MCP_PACKAGE_VERSION,downloads=join(root,"apps/web/public/downloads");
 function resolveRoot(){return dirname(dirname(import.meta.path));}
 mkdirSync(downloads,{recursive:true});mkdirSync(join(root,"plugins/claude-code/server"),{recursive:true});
 const built=await Bun.build({entrypoints:[join(root,"apps/cli/src/connector.ts")],target:"bun",minify:true,outdir:join(root,"plugins/claude-code/server"),naming:"connector.js"});
@@ -49,3 +50,4 @@ for(const [folder,id,name,file] of [["codex","codex","Codex","chat0110-codex"],[
 }
 await Bun.write(join(downloads,"plugins.json"),JSON.stringify({version,plugins:index},null,2)+"\n");
 console.log(JSON.stringify({plugins:index.map(p=>({name:p.name,bytes:p.bytes,sha256:p.sha256}))}));
+await import("./build-mcp-package.ts");

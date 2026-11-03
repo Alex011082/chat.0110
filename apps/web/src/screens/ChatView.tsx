@@ -31,6 +31,7 @@ export function syncStatus(st: SyncState, now: number): { lamp: LampState; text:
 }
 
 interface ChatViewProps {
+  onLoadHistory?:()=>Promise<void>;
   data: TimelineResponse;
   sync: SyncState;
   local: LocalEntry[];
@@ -70,6 +71,10 @@ export function ChatView(p: ChatViewProps) {
 
   const timeline = (
     <Timeline
+      hasMore={p.data.history?.has_more}
+      checking={p.data.history?.checking}
+      checkFailed={p.data.history?.check_failed}
+      onLoadHistory={p.onLoadHistory}
       chat={chat}
       items={items}
       local={p.local}

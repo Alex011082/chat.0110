@@ -38,6 +38,10 @@ import { useDesign } from "../lib/design.ts";
 import { DecisionCard, OutgoingProposals, type DecisionHandler } from "./DecisionCard.tsx";
 
 export interface TimelineProps {
+  hasMore?:boolean;
+  checking?:number;
+  checkFailed?:boolean;
+  onLoadHistory?:()=>Promise<void>;
   chat: ChatDetail;
   items: TimelineItem[];
   local: LocalEntry[];
@@ -64,6 +68,7 @@ export interface TimelineProps {
 }
 
 export function Timeline(p: TimelineProps) {
+  const [loadingHistory,setLoadingHistory]=useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const nearBottom = useRef(true);
   const opened = useRef(false);
@@ -187,11 +192,17 @@ export function Timeline(p: TimelineProps) {
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-[18px] pt-1.5 pb-4 tab:px-[26px] tab:pt-[18px] tab:pb-[30px]"
       >
         <div>
+        {p.checking?<p role="status" className="m-0 py-3 text-cap text-ink-2">{s.locale==="en"?`Checking ${p.checking} more items. Checked messages appear automatically.`:`Проверяем ещё ${p.checking} событий. Проверенные сообщения появляются автоматически.`}</p>:null}
+        {p.checkFailed?<p role="alert" className="m-0 py-3 text-cap text-action-ink">{s.locale==="en"?"Data protection is unavailable. Unchecked messages remain hidden; we will retry.":"Защита данных недоступна. Непроверенные сообщения скрыты; повторим проверку."}</p>:null}
+        {p.hasMore?<div className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-3 text-cap text-ink-2">
+          <span>{s.locale==="en"?"Showing recent activity. Earlier messages are kept in the history.":"Показаны последние события. Предыдущие сообщения сохранены в истории."}</span>
+          <Key disabled={loadingHistory} onClick={async()=>{if(loadingHistory)return;setLoadingHistory(true);nearBottom.current=false;try{await p.onLoadHistory?.();}finally{setLoadingHistory(false);}}}>{loadingHistory?(s.locale==="en"?"Loading history…":"Загружаем историю…"):(s.locale==="en"?"Load earlier history":"Загрузить предыдущую историю")}</Key>
+        </div>:null}
         {p.chat.parent ? (
           <ForkOrigin chat={p.chat} inherited={p.inherited} parentTitle={p.parentTitle} now={p.now} onToggle={onContext} />
         ) : null}
         <OutgoingProposals outgoing={p.outgoing} chat={p.chat} now={p.now} />
-        {groups.length === 0 ? <p className="m-0 py-6 text-copy text-ink-2">{s.timeline.emptyChat}</p> : null}
+        {groups.length === 0&&!p.checking&&!p.checkFailed ? <p className="m-0 py-6 text-copy text-ink-2">{s.timeline.emptyChat}</p> : null}
         {groups.map((g) => (
           <div key={g.key} role="group" aria-label={g.label}>
             <div className="flex items-center gap-3 pt-1.5 pb-2.5 text-ink-2" aria-hidden="true">

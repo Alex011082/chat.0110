@@ -40,10 +40,10 @@ export function createStatic(distDir: string) {
     }
     const pathname = new URL(req.url).pathname;
     if(pathname.startsWith("/downloads/")){
-      if(!/^\/downloads\/(?:plugins\.json|chat0110-(?:codex|claude-code)-[0-9]+\.[0-9]+\.[0-9]+\.zip(?:\.sha256)?)$/.test(pathname))return new Response("Не найдено",{status:404});
+      if(!/^\/downloads\/(?:(?:plugins|mcp)\.json|chat0110-(?:codex|claude-code)-[0-9]+\.[0-9]+\.[0-9]+\.zip(?:\.sha256)?|chat0110-mcp-[0-9]+\.[0-9]+\.[0-9]+\.tgz(?:\.sha256)?)$/.test(pathname))return new Response("Не найдено",{status:404});
       const file=await fileIfExists(inside(pathname.slice(1)));if(!file)return new Response("Не найдено",{status:404});
-      const manifest=pathname.endsWith(".json"),zip=pathname.endsWith(".zip");
-      return new Response(file,{headers:{"Content-Type":manifest?"application/json":zip?"application/zip":"text/plain; charset=utf-8","Cache-Control":manifest?"no-cache":IMMUTABLE,"X-Content-Type-Options":"nosniff",...(!manifest?{"Content-Disposition":`attachment; filename="${pathname.split("/").at(-1)}"`}:{})}});
+      const manifest=pathname.endsWith(".json"),zip=pathname.endsWith(".zip"),tar=pathname.endsWith(".tgz");
+      return new Response(file,{headers:{"Content-Type":manifest?"application/json":zip?"application/zip":tar?"application/gzip":"text/plain; charset=utf-8","Cache-Control":manifest?"no-cache":IMMUTABLE,"X-Content-Type-Options":"nosniff",...(!manifest?{"Content-Disposition":`attachment; filename="${pathname.split("/").at(-1)}"`}:{})}});
     }
     if (["/sw.js", "/manifest.webmanifest", "/offline.html"].includes(pathname)) {
       const file=await fileIfExists(inside(pathname.slice(1)));
