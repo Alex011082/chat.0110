@@ -11,7 +11,7 @@ import { countTimeline, type LocalEntry } from "../lib/timeline.ts";
 import { forms, s } from "../strings.ts";
 import { AppLink } from "../ui/AppLink.tsx";
 import { Body, cx, Grille, Key, KeyLink, Lamp, Readout, RoundKey, Screen, type LampState } from "../ui/kit.tsx";
-import { DotsIcon } from "../ui/icons.tsx";
+import { ChevronIcon, DotsIcon } from "../ui/icons.tsx";
 import { Menu, type MenuItem } from "../ui/Menu.tsx";
 import { Composer } from "./Composer.tsx";
 import type { DecisionHandler } from "./DecisionCard.tsx";
@@ -61,7 +61,9 @@ interface ChatViewProps {
   onPropose: (() => void) | null;
   /** Светлый дизайн: тонкая шапка, участники и редкие действия за кнопками. */
   light?: boolean;
-  settings?:ReactNode;
+  settings?: ReactNode;
+  /** Подтверждение приглашения или копирования ссылки. */
+  onToast: (text: string) => void;
 }
 
 export function ChatView(p: ChatViewProps) {
@@ -111,6 +113,54 @@ export function ChatView(p: ChatViewProps) {
     />
   );
 
+  // Светлая шапка: кружки участников, «+» — позвать агента или человека, «⋯» — редкое.
+  const more: MenuItem[] = [
+    {
+      kind: "button",
+      label: s.header.fork,
+      title: forkFrom ? s.header.forkHint : s.header.forkNoMessages,
+      disabled: !forkFrom,
+      onClick: () => forkFrom && p.onFork(forkFrom),
+    },
+    ...(p.onPropose ? [{ kind: "button" as const, label: s.header.propose, title: s.header.proposeHint, onClick: p.onPropose }] : []),
+    { kind: "link", label: s.header.openInGitHub, href: chat.url, external: true },
+  ];
+  const title = (
+    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <h1 className={cx("m-0 truncate leading-snug font-semibold tracking-[-0.01em]", p.phone ? "text-[18px]" : "text-[23px]")}>{chat.title}</h1>
+      <span className="flex min-w-0 items-center gap-1.5 text-cap text-ink-2" aria-live="polite">
+        <Lamp state={status.lamp} size={8} ring={false} />
+        <span className="truncate">{status.lamp === "act" ? status.text : s.header.phoneStatus(chat.number, p.phone ? (status.online ? s.header.phoneOnline : s.header.phoneOffline) : status.text)}</span>
+      </span>
+    </div>
+  );
+  const controls = <>
+    <ParticipantsBar chat={chat} limit={p.phone ? 3 : p.infoKnob ? 2 : 4} store={p.data.chat_store} phone={p.phone} onToast={p.onToast}/>
+    <button type="button" className="chat-details-button" onClick={p.onInfo} aria-expanded={p.infoOpen}>{s.info.label}</button>
+    <Menu label={s.design.more} trigger={<DotsIcon />} items={more} />
+  </>;
+  const lightHeader = (
+    <header className={cx("light-chat-header", p.phone && "flex-wrap")}>
+      {p.phone ? <>
+        <div className="flex w-full items-center gap-2">
+          <button type="button" aria-label={s.header.back} onClick={p.onBack} className="settings-trigger shrink-0"><ChevronIcon left size={22}/></button>
+          {title}{p.settings}
+        </div>
+        <div className="flex w-full items-center justify-end gap-2">{controls}</div>
+      </> : <>{title}{controls}</>}
+    </header>
+  );
+
+  if (p.phone && p.light) {
+    return (
+      <div className="flex h-dvh flex-col bg-body">
+        {lightHeader}
+        {timeline}
+        {composer}
+      </div>
+    );
+  }
+
   if (p.phone) {
     return (
       <div className="flex h-dvh flex-col bg-ground">
@@ -128,9 +178,8 @@ export function ChatView(p: ChatViewProps) {
                 </span>
               </span>
             </div>
-            {p.light?p.settings:<LanguageSwitch />}
+            <LanguageSwitch />
             <RoundKey aria-label={s.header.infoKnob} aria-expanded={p.infoOpen} onClick={p.onInfo} />
-            {p.light?<div className="flex basis-full justify-end"><ParticipantsBar chat={chat} limit={3}/></div>:null}
           </Body>
           {timeline}
         </div>
@@ -140,31 +189,9 @@ export function ChatView(p: ChatViewProps) {
   }
 
   if (p.light) {
-    const more: MenuItem[] = [
-      {
-        kind: "button",
-        label: s.header.fork,
-        title: forkFrom ? s.header.forkHint : s.header.forkNoMessages,
-        disabled: !forkFrom,
-        onClick: () => forkFrom && p.onFork(forkFrom),
-      },
-      ...(p.onPropose ? [{ kind: "button" as const, label: s.header.propose, title: s.header.proposeHint, onClick: p.onPropose }] : []),
-      { kind: "link", label: s.header.openInGitHub, href: chat.url, external: true },
-    ];
     return (
       <>
-        <header className="light-chat-header">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <h1 className="m-0 truncate text-[23px] leading-snug font-semibold tracking-[-0.01em]">{chat.title}</h1>
-            <span className="flex min-w-0 items-center gap-1.5 text-cap text-ink-2" aria-live="polite">
-              <Lamp state={status.lamp} size={8} ring={false} />
-              <span className="truncate">{status.lamp === "act" ? status.text : s.header.phoneStatus(chat.number, status.text)}</span>
-            </span>
-          </div>
-          <ParticipantsBar chat={chat} limit={p.infoKnob?2:4}/>
-          <button type="button" className="chat-details-button" onClick={p.onInfo} aria-expanded={p.infoOpen}>{s.info.label}</button>
-          <Menu label={s.design.more} trigger={<DotsIcon />} items={more} />
-        </header>
+        {lightHeader}
         {timeline}
         {composer}
       </>

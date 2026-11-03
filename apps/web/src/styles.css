@@ -576,7 +576,7 @@
 }
 
 /* Самостоятельные участники и личные настройки: состояние не заменяет допуск канала. */
-.light-chat-header{display:flex;align-items:center;flex-shrink:0;gap:16px;padding:20px 28px;border-bottom:1px solid var(--line);background:var(--body)}
+.light-chat-header{position:relative;display:flex;align-items:center;flex-shrink:0;gap:16px;padding:20px 28px;border-bottom:1px solid var(--line);background:var(--body)}
 .light-sidebar .chat-row{margin:2px 8px;padding:12px 14px;border-radius:12px}
 .light-sidebar .chat-row.pressed{color:var(--ink)}
 .light-composer{padding:18px 28px 14px!important;background:var(--body)}
@@ -614,4 +614,4 @@
 @media(max-width:999px){.light-chat-header{gap:10px;padding:16px 20px}.light-chat-header h1{font-size:20px}.participant-buttons{gap:8px}.participant-face,.participant-add,.participant-overflow{width:36px;height:36px}.chat-details-button{font-size:12px}}
 @media(prefers-reduced-motion:reduce){.participant-face,.participant-add,.participant-overflow,.toggle-track,.toggle-thumb{transition:none}}
 
-@media(max-width:699px){.participant-popover{max-height:min(70dvh,calc(100dvh - 220px))}}
+@media(max-width:699px){.light-chat-header .participant-controls{position:static}.participant-popover{right:16px;top:calc(100% + 8px);max-height:min(70dvh,calc(100dvh - 220px))}}

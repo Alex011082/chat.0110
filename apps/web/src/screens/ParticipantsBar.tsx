@@ -5,11 +5,11 @@ import {participantTargets} from "../lib/participant-targets.ts";
 import {agentConnectionLabel,agentDeliveryState} from "../lib/auto-replies.ts";
 import {initials} from "../lib/text.ts";
 import {s} from "../strings.ts";
-import {PlusIcon,CloseIcon} from "../ui/icons.tsx";
+import {CloseIcon} from "../ui/icons.tsx";
 import {ParticipantAutoReplies} from "./ParticipantAutoReplies.tsx";
-import {PluginInstallHelp} from "./PluginInstallHelp.tsx";
+import {InviteButton} from "./Invite.tsx";
 
-export function ParticipantsBar({chat,limit=4}:{chat:ChatDetail;limit?:number}){
+export function ParticipantsBar({chat,limit=4,store,phone=false,onToast}:{chat:ChatDetail;limit?:number;store?:1|2;phone?:boolean;onToast:(text:string)=>void}){
  const key=`${chat.repo}/${chat.chat_id}`;
  const {data:view,error,setView}=useAgentConnections(key),en=s.locale==="en";
  const targets=useMemo(()=>participantTargets(chat.participants,view?.sessions??[]),[chat.participants,view?.sessions]);
@@ -38,7 +38,7 @@ export function ParticipantsBar({chat,limit=4}:{chat:ChatDetail;limit?:number}){
     </button>;
    })}
    {targets.length>limit?<button type="button" ref={node=>{if(node)triggers.current.set("list",node);}} className="participant-overflow" aria-label={en?"All participants":"Все участники"} aria-haspopup="dialog" aria-expanded={selected==="list"} onClick={()=>setSelected(selected==="list"?null:"list")}>+{targets.length-limit}</button>:null}
-   {chat.can_push&&chat.state==="open"?<PluginInstallHelp author="agent" repo={chat.repo} chatId={chat.chat_id} icon={<PlusIcon/>} label={en?"Invite AI to this chat":"Пригласить ИИ в этот чат"}/>:null}
+   <InviteButton chat={chat} store={store} phone={phone} onToast={onToast}/>
   </div>
   {selected&&(target||selected==="list")?<section ref={panel} id={id} role="dialog" aria-label={target?`${en?"Participant":"Участник"}: ${target.name}`:s.info.participants} className="participant-popover">
    <header className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="m-0 text-section font-semibold [overflow-wrap:anywhere]">{target?.name??s.info.participants}</h2>{target?.session?.model?<p className="mb-0 mt-1 text-cap text-ink-2">{target.session.model}</p>:null}</div><button type="button" className="settings-trigger shrink-0" aria-label={en?"Close participant":"Закрыть участника"} onClick={()=>close(true)}><CloseIcon/></button></header>

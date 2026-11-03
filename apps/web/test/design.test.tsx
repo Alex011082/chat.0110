@@ -111,6 +111,7 @@ function view(data: TimelineResponse, light: boolean): string {
       onDecision={async () => {}}
       onPropose={null}
       light={light}
+      onToast={() => {}}
     />,
   );
 }

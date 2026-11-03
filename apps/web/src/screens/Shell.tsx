@@ -60,9 +60,8 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
   const layout = useLayout();
   const now = useNow();
   const phone = layout === "phone";
-  // Светлый дизайн меняет раскладку компьютера и планшета; телефон пока тот же,
-  // только в светлых цветах.
-  const design=useDesign();
+  // Светлый чат на телефоне сохраняет отдельную шапку и общие настройки.
+  const design = useDesign();
   const light = design === "light" && !phone;
 
   const [repos, setRepos] = useState<RepoInfo[] | null>(null);
@@ -529,7 +528,8 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
         onDecide={decide}
         onDecision={onDecision}
         onPropose={current.data.chat_store === 2 || !current.data.chat.parent ? null : openPropose}
-        light={design==="light"}
+        light={design === "light"}
+        onToast={setToast}
       />
     );
   } else if (route.chatId && current.error && current.error.code !== "network" && current.error.code !== "rate_limited") {
@@ -579,6 +579,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       onJump={() => setInfoOpen(false)}
       onPropose={current.data.chat_store === 2 || !current.data.chat.parent ? null : openPropose}
       store={current.data.chat_store}
+      agentLink={design !== "light"}
     />
   ) : null;
 
