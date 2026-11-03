@@ -17,13 +17,31 @@ interface InviteProps {
   onToast: (text: string) => void;
 }
 
-/** Буфер обмена может быть закрыт (не https, запрет браузера) — тогда говорим об этом. */
+/**
+ * Буфер обмена может быть закрыт (не https, запрет встроенного окна). Тогда
+ * пробуем старый путь — выделить текст и скопировать; не вышло — говорим об этом.
+ */
 async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
     return true;
   } catch {
-    return false;
+    // Поле кладём в открытый лист, если он есть: за пределами модального
+    // <dialog> всё инертно, и выделение там не работает.
+    const host = document.querySelector("dialog[open]") ?? document.body;
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.readOnly = true;
+    area.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+    host.append(area);
+    area.select();
+    try {
+      return document.execCommand("copy");
+    } catch {
+      return false;
+    } finally {
+      area.remove();
+    }
   }
 }
 
@@ -113,7 +131,6 @@ export function InviteButton({ chat, store, phone, onToast }: InviteProps) {
         open={searching}
         chat={chat}
         phone={phone}
-        onToast={onToast}
         onClose={() => setSearching(false)}
         onBack={
           phone
@@ -171,7 +188,6 @@ function InvitePeople(p: {
   open: boolean;
   chat: ChatDetail;
   phone: boolean;
-  onToast: (text: string) => void;
   onClose: () => void;
   onBack: (() => void) | null;
 }) {
@@ -188,10 +204,11 @@ function InvitePeople(p: {
   );
 }
 
+// Итог приглашения и копирования пишем в самом листе: общая подсказка
+// сверху экрана оказалась бы под его затемнением.
 export function PeopleSearch({
   chat,
   phone,
-  onToast,
   onClose,
   onBack,
   initial = "",
@@ -199,7 +216,6 @@ export function PeopleSearch({
 }: {
   chat: ChatDetail;
   phone: boolean;
-  onToast: (text: string) => void;
   onClose: () => void;
   onBack: (() => void) | null;
   /** Для тестов: готовая строка поиска и выдача без запроса. */
@@ -211,6 +227,7 @@ export function PeopleSearch({
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const ids = useId();
   const q = searchable(query);
 
@@ -240,11 +257,12 @@ export function PeopleSearch({
 
   const invite = async (person: Person) => {
     setError(null);
+    setNotice(null);
     setRows((r) => ({ ...r, [person.login]: "busy" }));
     try {
       const out = await api().invite(chat.repo, chat.chat_id, person.login);
       setRows((r) => ({ ...r, [person.login]: out.status }));
-      if (out.status === "invited") onToast(s.invite.sent(person.name ?? person.login));
+      setNotice(out.status === "invited" ? s.invite.sent(person.name ?? person.login) : null);
     } catch (e) {
       setRows((r) => {
         const next = { ...r };
@@ -256,7 +274,7 @@ export function PeopleSearch({
   };
 
   const copyApp = () =>
-    void copyText(location.origin).then((ok) => onToast(ok ? s.invite.appCopied : s.errors.copyFailed));
+    void copyText(location.origin).then((ok) => (ok ? setNotice(s.invite.appCopied) : setError(s.errors.copyFailed)));
 
   return (
     <div
@@ -301,6 +319,7 @@ export function PeopleSearch({
           onChange={(e) => {
             setQuery(e.target.value);
             setError(null);
+            setNotice(null);
           }}
           placeholder={s.invite.search}
           autoComplete="off"
@@ -318,7 +337,8 @@ export function PeopleSearch({
         {q && results && results.length > 0 ? (
           <>
             <span className="scale px-1 pt-4 pb-1 text-ink-3">{s.invite.found}</span>
-            <ul className="m-0 flex list-none flex-col p-0">
+            {/* Пока ищем новое, прежняя выдача бледнеет, а не мигает. */}
+            <ul className={cx("m-0 flex list-none flex-col p-0 transition-opacity", loading && "opacity-50")}>
               {results.map((person) => (
                 <PersonRow
                   key={person.login}
@@ -350,6 +370,14 @@ export function PeopleSearch({
         ) : null}
       </div>
 
+      <p role="status" className={cx("m-0 shrink-0 text-cap text-ink", notice && "mt-3 flex items-start gap-2 rounded-[12px] bg-screen px-3 py-2.5")}>
+        {notice ? (
+          <>
+            <CheckIcon size={16} className="mt-px shrink-0 text-pilot" />
+            {notice}
+          </>
+        ) : null}
+      </p>
       <p className="m-0 mt-3 shrink-0 border-t border-line px-1 pt-3 text-cap text-ink-2">{s.invite.note}</p>
     </div>
   );

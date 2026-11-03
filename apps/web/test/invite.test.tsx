@@ -139,7 +139,7 @@ const found: Person[] = [
 
 const search = (chat: ChatDetail, initial: string, initialResults: Person[] | null, phone = false) =>
   renderToStaticMarkup(
-    <PeopleSearch chat={chat} phone={phone} onToast={() => {}} onClose={() => {}} onBack={phone ? () => {} : null} initial={initial} initialResults={initialResults} />,
+    <PeopleSearch chat={chat} phone={phone} onClose={() => {}} onBack={phone ? () => {} : null} initial={initial} initialResults={initialResults} />,
   );
 
 test("поиск человека: найденные с кнопкой «Пригласить», кто уже в чате — без кнопки", async () => {

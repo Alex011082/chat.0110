@@ -334,7 +334,7 @@ function ParticipantStack({ participants, expanded, onClick }: { participants: P
           className={cx(
             "flex size-7 items-center justify-center rounded-full text-[11px] font-semibold ring-2 ring-[var(--body)]",
             m.is_agent ? "bg-screen text-ink" : "bg-knob-ink text-knob-ink-fg",
-            i > 0 && "-ml-2",
+            i > 0 && "-ml-1.5",
           )}
         >
           {initials(m.author, m.display)}
