@@ -10,6 +10,7 @@ import {
 import { Key } from "../ui/kit.tsx";
 import { s } from "../strings.ts";
 import {PluginInstallHelp} from "./PluginInstallHelp.tsx";
+import {Toggle} from "../ui/Toggle.tsx";
 
 export function ParticipantAutoReplies({
   author,
@@ -19,6 +20,7 @@ export function ParticipantAutoReplies({
   chatId,
   canPush,
   onChange,
+  compact=false,
 }: {
   author: string;
   sessions: AgentSession[];
@@ -27,6 +29,7 @@ export function ParticipantAutoReplies({
   chatId: string;
   canPush: boolean;
   onChange: (value: AutoReplyView) => void;
+  compact?:boolean;
 }) {
   const en = s.locale === "en";
   const [busy, setBusy] = useState("");
@@ -48,9 +51,9 @@ export function ParticipantAutoReplies({
   if (!canPush) return null;
   if (!view)
     return (
-      <p className="m-0 mt-2 text-cap text-ink-2">
+      <div className="flex flex-col gap-3"><p className="m-0 mt-2 text-cap text-ink-2">
         {en ? "Checking the connection…" : "Проверяем подключение…"}
-      </p>
+      </p><PluginInstallHelp author={author} repo={repo} chatId={chatId}/></div>
     );
   return (
     <div className="mt-2 flex flex-col gap-2">
@@ -61,25 +64,25 @@ export function ParticipantAutoReplies({
               ? requested?"Waiting for the plugin · start requested":"Install the plugin once to receive new turns."
               : requested?"Включение запрошено · сессия к этому чату ещё не подключена":"Участник есть в истории. Подключи сессию к этому чату."}
           </p>
-          <Key disabled={!!busy} onClick={async()=>{if(busy)return;setBusy("author");setError(false);try{onChange(await setAuthorAutoReply(`${repo}/${chatId}`,author,!requested));}catch{setError(true);}finally{setBusy("");}}} className="self-start text-cap">
+          {compact?<div className="control-row"><span>{en?"Automatic replies":"Автоответы"}</span><Toggle label={en?"Automatic replies":"Автоответы"} checked={requested} disabled={!!busy} onChange={async()=>{if(busy)return;setBusy("author");setError(false);try{onChange(await setAuthorAutoReply(`${repo}/${chatId}`,author,!requested));}catch{setError(true);}finally{setBusy("");}}}/></div>:<Key disabled={!!busy} onClick={async()=>{if(busy)return;setBusy("author");setError(false);try{onChange(await setAuthorAutoReply(`${repo}/${chatId}`,author,!requested));}catch{setError(true);}finally{setBusy("");}}} className="self-start text-cap">
             {busy?(en?"Saving…":"Сохраняем…"):requested?(en?"Turn off automatic replies":"Выключить автоответы"):(en?"Turn on automatic replies":"Включить автоответы")}
-          </Key>
+          </Key>}
         </>
       ) : (
         sessions.map((session) => {
 
           return (
             <div key={session.id} className="flex flex-col gap-2">
-              {(
+              {!compact?(
                 <span className="text-cap text-ink-2">
                   {agentSessionName(session)}
                 </span>
-              )}
+              ):null}
               <span role="status" className="text-cap text-ink-2">
-                {agentConnectionLabel(session,view,en)}
+                {compact&&!session.auto_enabled?(en?"New turns are paused":"Новые задания приостановлены"):agentConnectionLabel(session,view,en)}
               </span>
               <span className="text-cap text-ink-2 [overflow-wrap:anywhere]">{en?"Address":"Обращение"}: @{session.alias}</span>
-              <Key
+              {compact?<div className="control-row"><span>{en?"Automatic replies":"Автоответы"}</span><Toggle label={`${en?"Automatic replies":"Автоответы"}: ${agentSessionName(session)}`} checked={!!session.auto_enabled} disabled={!!busy} onChange={()=>void toggle(session)}/></div>:<Key
                 onClick={() => void toggle(session)}
                 disabled={!!busy}
                 className="self-start text-cap"
@@ -95,7 +98,7 @@ export function ParticipantAutoReplies({
                     : en
                       ? "Turn on automatic replies"
                       : "Включить автоответы"}
-              </Key>
+              </Key>}
             </div>
           );
         })

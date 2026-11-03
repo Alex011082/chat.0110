@@ -1,7 +1,7 @@
+import {useAgentConnections} from "../lib/agent-connections.ts";
 import type { ChatDetail, Decision, ForkRef, InheritedContext, TimelineItem } from "@chat0110/chat-protocol";
-import { useEffect, useMemo, useState } from "react";
-import { dispatchRequest } from "../dispatch.ts";
-import { agentDeliveryState, mergeAgentParticipants, sessionsForAuthor, type AutoReplyView } from "../lib/auto-replies.ts";
+import { useMemo } from "react";
+import { agentDeliveryState, mergeAgentParticipants, sessionsForAuthor } from "../lib/auto-replies.ts";
 import { ParticipantAutoReplies } from "./ParticipantAutoReplies.tsx";
 import { useCopy } from "../hooks.ts";
 import { agentLinkPhrase } from "../lib/chat.ts";
@@ -31,36 +31,14 @@ interface InfoProps {
   onPropose: (() => void) | null;
   /** 2 — инструкция в Chat/AGENTS.md. Без поля чат ещё на схеме 1. */
   store?: 1 | 2;
+  showParticipants?:boolean;
 }
 
 /** Правая колонка: участники, ссылка для агента, решения, ветвления, паспорт чата. */
-export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, decisions, outgoing, onJump, onPropose, store }: InfoProps) {
+export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, decisions, outgoing, onJump, onPropose, store,showParticipants=true }: InfoProps) {
   const counts = useMemo(() => countTimeline(items), [items]);
   const owner = chat.created_by.toLowerCase();
-  const [autoReplies, setAutoReplies] = useState<AutoReplyView | null>(null);
-  const [autoError, setAutoError] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    setAutoReplies(null);
-    const refresh = () =>
-      dispatchRequest(`${chat.repo}/${chat.chat_id}`).then(
-        (value) => {
-          if (alive) {
-            setAutoReplies(value as AutoReplyView);
-            setAutoError(false);
-          }
-        },
-        () => {
-          if (alive) setAutoError(true);
-        },
-      );
-    void refresh();
-    const timer = setInterval(() => void refresh(), 5000);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
-  }, [chat.repo, chat.chat_id]);
+  const {data:autoReplies,error:autoError,setView:setAutoReplies}=useAgentConnections(showParticipants?`${chat.repo}/${chat.chat_id}`:"");
   const participants = useMemo(
     // Владелец — первым, остальные — кто писал недавно.
     () =>
@@ -74,7 +52,7 @@ export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, de
 
   return (
     <div className="flex flex-col gap-[22px]">
-      <Plate className="flex flex-col gap-3.5 px-6 pt-[22px] pb-7">
+      {showParticipants?<Plate className="flex flex-col gap-3.5 px-6 pt-[22px] pb-7">
         <h2 className="m-0 text-section font-semibold tracking-[-0.01em]">{s.info.participants}</h2>
         {participants.length === 0 ? <p className="m-0 text-cap text-ink-2">{s.info.nobody}</p> : null}
         <ul className="m-0 flex list-none flex-col gap-3 p-0">
@@ -98,7 +76,7 @@ export function InfoColumn({ chat, items, now, forks, inherited, parentTitle, de
           })}
         </ul>
         {autoError ? <p role="status" className="m-0 text-cap text-ink-2">{s.locale === "en" ? "Connection status unavailable. Retrying…" : "Не удалось проверить сессии. Повторяем…"}</p> : null}
-      </Plate>
+      </Plate>:null}
 
       <Body className="flex flex-col gap-3.5 px-[18px] pt-[18px] pb-[26px]">
         <div className="flex items-center justify-between gap-2.5">

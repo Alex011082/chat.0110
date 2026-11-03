@@ -1,10 +1,11 @@
+import {ParticipantsBar} from "./ParticipantsBar.tsx";
 import { LanguageSwitch } from "../ui/LanguageSwitch.tsx";
-import type { MessageItem, Participant, TimelineResponse } from "@chat0110/chat-protocol";
+import type { MessageItem, TimelineResponse } from "@chat0110/chat-protocol";
 import { useMemo, type ReactNode } from "react";
 import { ApiFailure, errorText } from "../api.ts";
 import { lastForkable } from "../lib/fork.ts";
 import { chatRoute } from "../lib/route.ts";
-import { initials, plural } from "../lib/text.ts";
+import { plural } from "../lib/text.ts";
 import { ago } from "../lib/time.ts";
 import { countTimeline, type LocalEntry } from "../lib/timeline.ts";
 import { forms, s } from "../strings.ts";
@@ -60,6 +61,7 @@ interface ChatViewProps {
   onPropose: (() => void) | null;
   /** Светлый дизайн: тонкая шапка, участники и редкие действия за кнопками. */
   light?: boolean;
+  settings?:ReactNode;
 }
 
 export function ChatView(p: ChatViewProps) {
@@ -113,7 +115,7 @@ export function ChatView(p: ChatViewProps) {
     return (
       <div className="flex h-dvh flex-col bg-ground">
         <div className="flex min-h-0 flex-1 flex-col gap-3.5 px-3.5 pt-3.5 pb-3.5">
-          <Body as="header" className="flex items-center gap-2.5 px-3 pt-3 pb-[18px] plinth-7">
+          <Body as="header" className="flex flex-wrap items-center gap-2.5 px-3 pt-3 pb-[18px] plinth-7">
             <RoundKey glyph="‹" aria-label={s.header.back} onClick={p.onBack} />
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <h1 className="m-0 truncate text-section font-semibold tracking-[-0.01em]">{chat.title}</h1>
@@ -126,8 +128,9 @@ export function ChatView(p: ChatViewProps) {
                 </span>
               </span>
             </div>
-            <LanguageSwitch />
+            {p.light?p.settings:<LanguageSwitch />}
             <RoundKey aria-label={s.header.infoKnob} aria-expanded={p.infoOpen} onClick={p.onInfo} />
+            {p.light?<div className="flex basis-full justify-end"><ParticipantsBar chat={chat} limit={3}/></div>:null}
           </Body>
           {timeline}
         </div>
@@ -150,15 +153,16 @@ export function ChatView(p: ChatViewProps) {
     ];
     return (
       <>
-        <header className="flex shrink-0 items-center gap-3 border-b border-line px-5 py-3">
+        <header className="light-chat-header">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <h1 className="m-0 truncate text-[17px] leading-snug font-semibold tracking-[-0.01em]">{chat.title}</h1>
+            <h1 className="m-0 truncate text-[23px] leading-snug font-semibold tracking-[-0.01em]">{chat.title}</h1>
             <span className="flex min-w-0 items-center gap-1.5 text-cap text-ink-2" aria-live="polite">
               <Lamp state={status.lamp} size={8} ring={false} />
               <span className="truncate">{status.lamp === "act" ? status.text : s.header.phoneStatus(chat.number, status.text)}</span>
             </span>
           </div>
-          <ParticipantStack participants={chat.participants} expanded={p.infoOpen} onClick={p.onInfo} />
+          <ParticipantsBar chat={chat} limit={p.infoKnob?2:4}/>
+          <button type="button" className="chat-details-button" onClick={p.onInfo} aria-expanded={p.infoOpen}>{s.info.label}</button>
           <Menu label={s.design.more} trigger={<DotsIcon />} items={more} />
         </header>
         {timeline}
@@ -267,41 +271,5 @@ export function MainPlaceholder({
         {action ? <div className="pt-1">{action}</div> : null}
       </Body>
     </div>
-  );
-}
-
-/**
- * Участники стопкой кружков — кнопка светлой шапки. Открывает сведения о чате:
- * участников с автоответами, ссылку для агента, развилки и решения
- * (InfoColumn), которые в «приборе» стоят отдельной колонкой.
- */
-function ParticipantStack({ participants, expanded, onClick }: { participants: Participant[]; expanded: boolean; onClick: () => void }) {
-  const shown = participants.slice(0, 3);
-  const rest = participants.length - shown.length;
-  return (
-    <button
-      type="button"
-      aria-label={s.design.participants}
-      title={s.design.participants}
-      aria-expanded={expanded}
-      onClick={onClick}
-      className="flex h-9 shrink-0 items-center rounded-full border-0 bg-transparent py-1 pr-2.5 pl-1 hover:bg-screen"
-    >
-      {shown.map((m, i) => (
-        <span
-          key={m.author}
-          aria-hidden="true"
-          className={cx(
-            "flex size-7 items-center justify-center rounded-full text-[11px] font-semibold ring-2 ring-[var(--body)]",
-            m.is_agent ? "bg-screen text-ink" : "bg-knob-ink text-knob-ink-fg",
-            i > 0 && "-ml-2",
-          )}
-        >
-          {initials(m.author, m.display)}
-        </span>
-      ))}
-      {participants.length === 0 ? <span className="px-1 text-cap text-ink-2">{s.info.participants}</span> : null}
-      {rest > 0 ? <span className="ml-1.5 text-cap text-ink-2">+{rest}</span> : null}
-    </button>
   );
 }

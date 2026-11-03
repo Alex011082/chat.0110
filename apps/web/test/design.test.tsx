@@ -115,12 +115,15 @@ function view(data: TimelineResponse, light: boolean): string {
   );
 }
 
-test("шапка светлого: участники — кнопкой, Fork и GitHub — в закрытом меню «⋯»", async () => {
+test("шапка светлого: каждый участник — отдельная кнопка, сведения о чате отделены", async () => {
   setLocale("ru");
   setDesign("light");
   const html = view(await demoChat(), true);
   const header = html.slice(0, html.indexOf("</header>"));
-  expect(header).toContain('aria-label="Участники и сведения о чате"');
+  expect(header).toContain('aria-label="Открыть участника: Claude —');
+  expect(header).toContain('aria-label="Открыть участника: Codex —');
+  expect(header).not.toContain('-ml-2');
+  expect(header).toContain('>О чате</button>');
   expect(header).toContain('aria-label="Ещё"');
   expect(header).toContain("PR #3 · на связи");
   expect(html).not.toContain("Открыть в GitHub");

@@ -70,3 +70,5 @@ export function DotsIcon(p: IconProps) {
     </Svg>
   );
 }
+export function CloseIcon(p:IconProps){return <Svg {...p}><path d="m6 6 12 12M18 6 6 18"/></Svg>;}
+export function ArrowRightIcon(p:IconProps){return <Svg {...p}><path d="M5 12h14m-5-5 5 5-5 5"/></Svg>;}

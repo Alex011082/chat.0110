@@ -1,3 +1,4 @@
+import {useAgentConnections} from "../lib/agent-connections.ts";
 import {agentConnectionLabel,agentDeliveryState,agentSessionName} from "../lib/auto-replies.ts";
 import { PrivacyPanel } from "./PrivacyPanel.tsx";
 import { canonicalMention, mentionRoute, resolveMention, suggestMentions, type DispatchView } from "@chat0110/chat-protocol";
@@ -32,33 +33,11 @@ export function Composer(p: ComposerProps) {
   const online=useOnline();
   useEffect(()=>{drafts.set(p.chatKey,text,p.reply?.id);},[p.reply?.id,p.chatKey,text]);
   const area = useRef<HTMLTextAreaElement>(null);
-  const [dispatch, setDispatch] = useState<DispatchView | null>(null);
-  const [dispatchError, setDispatchError] = useState(false);
+  const {data:dispatch,error:dispatchError,setView:setDispatch}=useAgentConnections(p.chatKey);
   const [stopError, setStopError] = useState(false);
   const [cursor, setCursor] = useState(text.length);
   const [selected, setSelected] = useState(0);
   const d = dispatchText(s.locale === "en");
-  useEffect(() => {
-    let alive = true;
-    const refresh = () =>
-      dispatchRequest(p.chatKey).then(
-        (value) => {
-          if (alive) {
-            setDispatch(value);
-            setDispatchError(false);
-          }
-        },
-        () => {
-          if (alive) setDispatchError(true);
-        },
-      );
-    void refresh();
-    const timer = setInterval(() => void refresh(), 5000);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
-  }, [p.chatKey]);
   let route: string[] = [];
   let routingError = "";
   try {
@@ -307,7 +286,7 @@ export function Composer(p: ComposerProps) {
   // mention-help), куда ляжет сообщение — во всплывающей подсказке поля.
   if (p.light) {
     return (
-      <form onSubmit={onSubmit} className="flex shrink-0 flex-col gap-1.5 border-t border-line px-5 pt-3 pb-3">
+      <form onSubmit={onSubmit} className="light-composer flex shrink-0 flex-col gap-1.5 border-t border-line px-5 pt-3 pb-3">
         {replyChip}
         {routePanel}
         {checkingHint}
