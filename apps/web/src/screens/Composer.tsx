@@ -21,6 +21,8 @@ interface ComposerProps {
   phone: boolean;
   /** Растёт, когда нажали «Ответить», — повод поставить курсор в поле. */
   focusTick: number;
+  /** Светлый дизайн: подсказка про @ — в самом поле, ветка — во всплывающей подсказке. */
+  light?: boolean | undefined;
 }
 
 export function Composer(p: ComposerProps) {
@@ -258,7 +260,8 @@ export function Composer(p: ComposerProps) {
         rows={1}
         value={text}
         disabled={!p.canPush || sending}
-        placeholder={s.composer.placeholder}
+        placeholder={p.light ? s.design.placeholder : s.composer.placeholder}
+        title={p.light && p.canPush ? s.composer.hint(p.branch) : undefined}
         onChange={(e) => {
           update(e.target.value);
           setCursor(e.target.selectionStart);
@@ -293,6 +296,31 @@ export function Composer(p: ComposerProps) {
         <div className="flex items-end gap-2.5">
           {field}
           <ActionRound type="submit" aria-label={s.composer.send} disabled={!p.canPush || !online || !!routingError || sending} />
+        </div>
+      </form>
+    );
+  }
+
+  // Светлый: поле с кнопкой и одна тихая строка справа — подключить ИИ и
+  // защита данных. Подсказка про @ и @@ живёт в поле (и для чтеца — в
+  // mention-help), куда ляжет сообщение — во всплывающей подсказке поля.
+  if (p.light) {
+    return (
+      <form onSubmit={onSubmit} className="flex shrink-0 flex-col gap-1.5 border-t border-line px-5 pt-3 pb-3">
+        {replyChip}
+        {routePanel}
+        {checkingHint}
+        <div className="flex items-end gap-2.5">
+          {field}
+          <ActionKey type="submit" disabled={!p.canPush || !online || !!routingError || sending}>
+            {sending ? (s.locale === "en" ? "Checking…" : "Проверяем…") : s.composer.send}
+          </ActionKey>
+        </div>
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-4 gap-y-1 px-1 text-cap text-ink-2">
+          <span id="mention-help" className="sr-only-text">{d.help}</span>
+          {p.canPush ? null : <span className="mr-auto min-w-0 [overflow-wrap:anywhere]">{s.composer.readOnly}</span>}
+          {connectLink}
+          <PrivacyPanel chatKey={p.chatKey} text={text} onApply={update} compact />
         </div>
       </form>
     );
