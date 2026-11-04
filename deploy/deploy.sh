@@ -47,7 +47,7 @@ rsync -a --delete \
   --include='/package.json' --include='/apps/' --include='/apps/api/***' \
   --include='/apps/web/' --include='/apps/web/dist/***' \
   --include='/packages/' --include='/packages/chat-protocol/***' \
-  --include='/deploy/' --include='/deploy/chat0110.service' --include='/deploy/preserve-downloads.py' \
+  --include='/deploy/' --include='/deploy/chat0110.service' --include='/deploy/preserve-downloads.py' --include='/deploy/rollback-policy.py' --include='/deploy/rollback-environment.py' --include='/deploy/check-channel-guard.ts' --include='/deploy/select-rollback.sh' \
   --exclude='*' "$STAGE/" "$SERVER:$REL.incoming/"
 
 ssh "$SERVER" "set -euo pipefail
@@ -87,6 +87,8 @@ for path in root.glob(\"*.sqlite\"):
     done
   fi
   echo 'Сервис не ответил на /health за 15 с; возвращаю предыдущий релиз:' >&2
+  # При неподтверждённой совместимости не открываем старый API над новой очередью.
+  sudo bash $REL/deploy/select-rollback.sh $REL \$PREVIOUS /var/lib/chat0110/dispatch.sqlite || exit 1
   sudo install -m 644 -o root -g root $REL/deploy/chat0110.service.previous /etc/systemd/system/chat0110.service
   sudo systemctl daemon-reload
   sudo ln -sfn \$PREVIOUS /opt/chat0110/.rollback-$SHA

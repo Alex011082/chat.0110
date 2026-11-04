@@ -24,3 +24,19 @@ jobs:
       - run: bun run build
       - name: Скрипты выката
         run: for f in deploy/*.sh; do bash -n "$f"; done
+      - name: Совместимый артефакт отката и проверка очереди
+        env:
+          CHAT0110_ROLLBACK_FRONTEND_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CHAT0110_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          [[ "$CHAT0110_ROLLBACK_FRONTEND_REF" =~ ^[a-f0-9]{40}$ ]]
+          git fetch --depth=1 origin "$CHAT0110_ROLLBACK_FRONTEND_REF"
+          git fetch --depth=1 origin b690559660c4e3920e2a21dac35c8982b1801e13
+          bun scripts/build-rollback-artifact.ts "$CHAT0110_ROLLBACK_FRONTEND_REF" artifacts
+          bun scripts/check-rollback-artifact.ts artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chat0110-rollback-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/
+          retention-days: 7
+          if-no-files-found: error

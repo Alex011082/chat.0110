@@ -11,14 +11,21 @@ test("старый API разрешён только до первого пер�
   const [out,error,status]=await Promise.all([new Response(p.stdout).text(),new Response(p.stderr).text(),p.exited]);return {out,error,status};
  };
  try{
-  let db=new Database(path);db.exec("CREATE TABLE sessions(id TEXT PRIMARY KEY)");db.close();
+  let db=new Database(path);db.exec(`
+   CREATE TABLE sessions(id TEXT,uid INTEGER,repo TEXT,chat TEXT,external TEXT,alias TEXT,author TEXT);
+   CREATE TABLE chains(id TEXT,uid INTEGER,repo TEXT,chat TEXT,route TEXT,step INTEGER,status TEXT);
+   CREATE TABLE tasks(id TEXT,chain_id TEXT,session_id TEXT,step INTEGER,status TEXT,claim TEXT,answer_id TEXT);
+   CREATE TABLE agent_pulls(session_id TEXT,request_id TEXT,task_id TEXT);
+  `);db.close();
   expect((await run()).status).toBe(0);
   db=new Database(path);db.exec("CREATE TABLE channel_bindings(session_id TEXT,key_hash TEXT);CREATE TABLE channel_publications(task_id TEXT,session_id TEXT)");db.close();
   expect((await run()).status).toBe(0);
   db=new Database(path);db.exec("INSERT INTO channel_bindings VALUES ('one','private-key-fixture')");db.close();
   const blocked=await run();expect(blocked.status).toBe(2);expect(blocked.out+blocked.error).not.toContain("private-key-fixture");
   db=new Database(path);db.exec("DELETE FROM channel_bindings;INSERT INTO channel_publications VALUES ('task','one')");db.close();expect((await run()).status).toBe(2);
-  expect((await run(join(root,"missing.sqlite"))).status).toBe(2);
-  writeFileSync(join(root,"invalid.sqlite"),"not sqlite");expect((await run(join(root,"invalid.sqlite"))).status).toBe(2);
+  expect((await run(join(root,"missing.sqlite"))).status).toBe(3);
+  writeFileSync(join(root,"invalid.sqlite"),"not sqlite");expect((await run(join(root,"invalid.sqlite"))).status).toBe(3);
+  writeFileSync(join(root,"empty.sqlite"),"");expect((await run(join(root,"empty.sqlite"))).status).toBe(3);
+  db=new Database(join(root,"foreign.sqlite"));db.exec("CREATE TABLE unrelated(id TEXT)");db.close();expect((await run(join(root,"foreign.sqlite"))).status).toBe(3);
  }finally{rmSync(root,{recursive:true,force:true});}
 });
