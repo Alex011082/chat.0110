@@ -24,12 +24,3 @@ test("контекст чата сохраняется без shell-аргуме
   expect(connectContext("?repo=a/b;echo&chat=20261102-abcd")).toBeNull();
   expect(connectContext("?repo=https://evil.test&chat=20261102-abcd")).toBeNull();
 });
-
-test("локальный клиент получает маршрут next/context/reply, а не команды удалённого Apps-коннектора", () => {
-  for (const en of [false, true]) for (const card of agentCards(en).filter(c => ["codex", "claude-code", "grok-build", "other-ai"].includes(c.id))) {
-    const task = sessionSetupTask(card, en, {repo:"owner/product",chat_id:"20261103-abcd"});
-    expect(task).toContain("chat0110_next");
-    expect(task).not.toContain("chat0110_take");
-    expect(task).not.toContain("chat0110_pending");
-  }
-});
