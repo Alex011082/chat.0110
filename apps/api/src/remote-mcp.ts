@@ -213,7 +213,9 @@ export function createRemoteMcp(o: Options) {
     if(name==="chat0110_status"||name==="chat0110_set_auto_reply"){
       if(typeof args.session_id!=="string"||!args.session_id.trim())throw badRequest("Нужен session_id из connect");
       const session=dispatch.session(args.session_id,uid),repo=repoRef(session.repo);
+      dispatch.assertChannel(uid,session.id);
       await requireOpenChat(gh,repo,session.chat);
+      dispatch.assertChannel(uid,session.id);
       if(name==="chat0110_set_auto_reply"){
         if(typeof args.enabled!=="boolean")throw badRequest("Нужен enabled boolean");
         dispatch.setAutoEnabled(uid,session.id,args.enabled);if(args.enabled)void pump();
@@ -226,12 +228,14 @@ export function createRemoteMcp(o: Options) {
       if (typeof args.session_id !== "string" || !args.session_id.trim())
         throw badRequest("Передай session_id из chat0110_connect; если параметра нет, обнови каталог инструментов MCP");
       const author = canonicalMention(String(args.author ?? "chatgpt"));
+      dispatch.assertChannel(uid,args.session_id);
       const until = Date.now() + (args.wait === true ? 25_000 : 0);
       let ready;
       const stopWaiting = args.wait === true ? dispatch.waiting(args.session_id, uid, author) : () => {};
       signal.addEventListener("abort", stopWaiting, { once: true });
       try {
         do {
+          dispatch.assertChannel(uid,args.session_id);
           ready = dispatch.remoteReady(uid, author, args.session_id);
           if (ready.length || Date.now() >= until || signal.aborted) break;
           await Bun.sleep(500);
@@ -248,6 +252,7 @@ export function createRemoteMcp(o: Options) {
     if (!info.can_push) throw forbidden("Нет права записи");
     const pull = await gh.findChatPull(repo, task.chat);
     if (!pull || pull.state !== "open") throw new HttpError(409, "conflict", "Чат закрыт");
+    dispatch.assertChannel(uid,task.session_id);
     if (name === "chat0110_take") {
       if (task.status === "done") return { done: true, task_id: id };
       const claimed = task.claim ? task : dispatch.claim(task.session_id, id);

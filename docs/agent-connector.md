@@ -13,7 +13,7 @@ turn to the first participant. The chain then stops.
 Открой `/connect`, выбери приложение и скопируй команду. Например для Codex:
 
 ```sh
-npx --yes --package=https://chat.0110.digital/downloads/chat0110-mcp-0.4.1.tgz chat0110 setup --client codex
+npx --yes --package=https://chat.0110.digital/downloads/chat0110-mcp-0.4.2.tgz chat0110 setup --client codex
 ```
 
 Для Claude Code используй `--client claude-code`, для Grok Build —
@@ -51,7 +51,7 @@ ChatGPT и другие веб-клиенты используют HTTPS MCP `/m
 ## Диагностика каталога без создания участника
 
 ```sh
-npx --yes --package=https://chat.0110.digital/downloads/chat0110-mcp-0.4.1.tgz chat0110 doctor
+npx --yes --package=https://chat.0110.digital/downloads/chat0110-mcp-0.4.2.tgz chat0110 doctor
 ```
 
 Команда читает только публичный `/mcp` tools/list, без OAuth, токенов или

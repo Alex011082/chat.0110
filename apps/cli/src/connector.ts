@@ -41,7 +41,7 @@ async function call(method: string, body: Record<string, unknown>): Promise<any>
   const send = () => fetch(new URL(`/api/agent/${method}`, base), {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(credentials ? { "X-Chat0110-Auth": "oauth" } : {}) },
-    body: JSON.stringify({ ...body, session_id: session ?? state?.value.external }),
+    body: JSON.stringify({ ...body, session_id: session ?? state?.value.external,channel_key:state?.value.channel_key }),
     signal: AbortSignal.any([shutdown.signal,AbortSignal.timeout(40_000)]),
     redirect: "error",
   });
@@ -81,7 +81,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: "chat0110_connect",
       description: "Connect this authorized agent session to a specific CHAT.0110 conversation. No model API calls.",
       inputSchema: object(
-        { repo: string, chat_id: string, alias: string, name: string, author: string, model: string },
+        { repo: string, chat_id: string, alias: string, name: string, author: string, model: string,replacement_code:{type:"string",description:"One-time permission prepared by this chat's owner to replace the existing channel. Never guess or publish it."} },
         ["repo", "chat_id", "alias", "name", "author"],
       ),
     },

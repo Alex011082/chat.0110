@@ -11,6 +11,7 @@ import { Key } from "../ui/kit.tsx";
 import { s } from "../strings.ts";
 import {PluginInstallHelp} from "./PluginInstallHelp.tsx";
 import {Toggle} from "../ui/Toggle.tsx";
+import {ChannelReplacement} from "./ChannelReplacement.tsx";
 
 export function ParticipantAutoReplies({
   author,
@@ -99,6 +100,7 @@ export function ParticipantAutoReplies({
                       ? "Turn on automatic replies"
                       : "Включить автоответы"}
               </Key>}
+              <ChannelReplacement key={`${repo}/${chatId}/${session.id}`} session={session} repo={repo} chatId={chatId}/>
             </div>
           );
         })

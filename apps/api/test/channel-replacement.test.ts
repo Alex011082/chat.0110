@@ -65,6 +65,38 @@ test("push без владения чатом, закрытый чат и чуж
  }finally{f.db.close();}
 });
 
+test("ожидающая очередь и маршрут остаются у прежнего id; истёкший код ничего не меняет",async()=>{
+ const f=await fixture();try{
+  f.dispatch.enqueue("queued",7,repo,chat,"m","question",[f.old.id]);
+  expect((await f.issue()).status).toBe(201);
+  f.db.exec("UPDATE channel_replacements SET expires=1");
+  expect((await f.connect()).status).toBe(409);
+  const nextCode="f6".repeat(32);expect((await f.issue(nextCode)).status).toBe(201);
+  expect((await f.connect({replacement_code:nextCode})).status).toBe(200);
+  expect(f.dispatch.chain("queued",7)?.status).toBe("waiting");
+  const got=await f.post("/api/agent/next",{session_id:f.old.id,channel_key:key});
+  const task=(await got.json()).task;expect(task).toMatchObject({chain_id:"queued",session_id:f.old.id,step:0});
+  expect(f.dispatch.list(7,repo,chat).chains[0]?.route).toEqual([f.old.id]);
+ }finally{f.db.close();}
+});
+
+test("старый long poll теряет доступ и не стирает готовность нового приёмника",async()=>{
+ const f=await fixture();try{
+  const old=f.post("/api/agent/next",{session_id:f.old.id,wait:true});
+  const until=Date.now()+2000;while(!f.dispatch.list(7,repo,chat).sessions[0]?.delivery_ready&&Date.now()<until)await Bun.sleep(5);
+  expect(f.dispatch.list(7,repo,chat).sessions[0]?.delivery_ready).toBe(true);
+  expect((await f.issue()).status).toBe(201);expect((await f.connect()).status).toBe(200);
+  const next=f.post("/api/agent/next",{session_id:f.old.id,channel_key:key,wait:true});
+  expect((await old).status).toBe(403);
+  expect(f.dispatch.list(7,repo,chat).sessions[0]?.delivery_ready).toBe(true);
+  // Повтор потерянного register не должен сбрасывать уже работающий приёмник.
+  expect((await f.connect()).status).toBe(200);
+  expect(f.dispatch.list(7,repo,chat).sessions[0]?.delivery_ready).toBe(true);
+  f.dispatch.enqueue("new-only",7,repo,chat,"m","question",[f.old.id]);
+  expect((await (await next).json()).task.chain_id).toBe("new-only");
+ }finally{f.db.close();}
+});
+
 for(const cancelled of [false,true])test(`взятый${cancelled?" и остановленный":""} ход блокирует замену без повторной выдачи`,async()=>{
  const f=await fixture();try{
   f.dispatch.enqueue("busy",7,repo,chat,"m","question",[f.old.id]);const t=f.dispatch.claim(f.old.id)!;

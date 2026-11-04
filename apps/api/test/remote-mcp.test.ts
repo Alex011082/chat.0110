@@ -129,6 +129,40 @@ async function setup() {
   const token = (await tokenResponse!.json()).access_token;
   return { db, fake, dispatch, events, remote, token, request, delivered };
 }
+test("после явной замены прежний Apps не читает и не управляет участником, OAuth аккаунта остаётся",async()=>{
+ const f=await setup();try{
+  const a=f.dispatch.register(7,repo,chat,"remote:chatgpt:7:codex","codex","Codex","codex");
+  f.dispatch.enqueue("rebound",7,repo,chat,"m","q",[a.id]);
+  const code="a1".repeat(32),key="b2".repeat(32);
+  f.dispatch.issueChannelReplacement(7,a.id,code);
+  f.dispatch.replaceChannel(7,repo,chat,"codex","codex","11111111-2222-4333-8444-555555555555",key,code);
+  const task=f.db.query<{id:string},[]>("SELECT id FROM tasks WHERE chain_id='rebound'").get()!;
+  for(const [name,args] of [["chat0110_pending",{session_id:a.id,author:"codex"}],["chat0110_status",{session_id:a.id}],["chat0110_set_auto_reply",{session_id:a.id,enabled:false}],["chat0110_take",{task_id:task.id}]] as const){
+   const r=await(await f.remote.handle(f.request("tools/call",{name,arguments:args},f.token))).json();expect(r.result.isError).toBe(true);
+  }
+  expect(f.dispatch.session(a.id,7).auto_enabled).toBe(1);
+  expect(f.dispatch.chain("rebound",7)?.status).toBe("waiting");
+  const account=await(await f.remote.handle(f.request("tools/call",{name:"chat0110_account",arguments:{}},f.token))).json();
+  expect(account.result.isError).not.toBe(true);
+ }finally{f.db.close();}
+});
+
+test("Apps take, задержанный в GitHub до замены, не получает claim после неё",async()=>{
+ const f=await setup();let release=()=>{};try{
+  const a=f.dispatch.register(7,repo,chat,"remote:chatgpt:7:codex","codex","Codex","codex");
+  f.dispatch.enqueue("delayed",7,repo,chat,"m","q",[a.id]);
+  const task=f.db.query<{id:string},[]>("SELECT id FROM tasks WHERE chain_id='delayed'").get()!;
+  f.fake.on("GET",/\/repos\/alex011082\/chat\.0110$/i,{body:{full_name:repo,name:"chat.0110",owner:{login:"Alex011082"},default_branch:"main",permissions:{push:true}}});
+  let entered=()=>{};const gate=new Promise<void>(r=>{entered=r;}),held=new Promise<void>(r=>{release=r;});
+  f.fake.on("GET",/\/pulls\?state=all&head=/,async()=>{entered();await held;return {body:[{number:1,title:"Chat",body:`<!-- chat0110\nchat_id: ${chat}\n-->`,state:"open",draft:true,head:{ref:`chat/${chat}`,sha:"h",repo:{full_name:repo}},base:{ref:"main"},user:{login:"Alex011082"}}]};});
+  const waiting=f.remote.handle(f.request("tools/call",{name:"chat0110_take",arguments:{task_id:task.id}},f.token));
+  await gate;
+  const code="c3".repeat(32);f.dispatch.issueChannelReplacement(7,a.id,code);
+  f.dispatch.replaceChannel(7,repo,chat,"codex","codex","11111111-2222-4333-8444-555555555555","d4".repeat(32),code);
+  release();expect((await(await waiting).json()).result.isError).toBe(true);
+  expect(f.db.query<{claim:string|null},[string]>("SELECT claim FROM tasks WHERE id=?").get(task.id)?.claim).toBeNull();
+ }finally{release();f.db.close();}
+});
 test("удалённый MCP требует OAuth, выдаёт события и доставляет ожидающий ход", async () => {
   const { db, fake, dispatch, remote, token, request, delivered } = await setup();
   try {
