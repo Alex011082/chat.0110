@@ -15,18 +15,21 @@ const run=async(args:string[],env:NodeJS.ProcessEnv=process.env)=>{
 };
 const okay=async(args:string[])=>{const result=await run(args);assert.equal(result.status,0,result.error);return result;};
 try{
+ console.log("rollback: проверка digest и распаковка");
  const sha256=createHash("sha256").update(readFileSync(archive)).digest("hex");assert.equal(sha256,build.sha256);
  const extracted=join(dir,"artifact");await okay(["python3",join(root,"scripts/rollback-tar.py"),"extract",archive,extracted]);
  const manifest=JSON.parse(readFileSync(join(extracted,"rollback-manifest.json"),"utf8"));
  for(const field of ["api_revision","source_revision","frontend_revision","mcp_version"])assert.equal(manifest[field],build[field]);
  // Выполняем именно распакованный API и Node MCP из архива, не текущий checkout.
  const proof=await checkChannelGuard(extracted);
+ console.log("rollback: положительный API/MCP probe завершён");
  const incompatible=join(dir,"incompatible");cpSync(extracted,incompatible,{recursive:true});
  rmSync(join(incompatible,"apps/api/src"),{recursive:true});
  const legacyRevision="b690559660c4e3920e2a21dac35c8982b1801e13";
- const oldTar=join(dir,"old-api.tar"),git=Bun.spawn(["git","archive","--format=tar",legacyRevision,"apps/api/src"],{stdout:"pipe",stderr:"pipe"});
- await Bun.write(oldTar,new Response(git.stdout));assert.equal(await git.exited,0);await okay(["tar","-xf",oldTar,"-C",incompatible]);
+ const oldTar=join(dir,"old-api.tar");
+ await okay(["git","archive","--format=tar","--output",oldTar,legacyRevision,"apps/api/src"]);await okay(["tar","-xf",oldTar,"-C",incompatible]);
  await assert.rejects(()=>checkChannelGuard(incompatible));
+ console.log("rollback: несовместимый API отвергнут");
  const changed=join(dir,"changed");cpSync(extracted,changed,{recursive:true});
  writeFileSync(join(changed,"apps/api/src/dispatch.ts"),"invalid synthetic file\n");
  const corrupt=join(dir,"corrupt.tar.gz");await okay(["python3",join(root,"scripts/rollback-tar.py"),"pack",changed,corrupt]);
@@ -75,6 +78,7 @@ exec '${process.execPath.replaceAll("'","'\\''")}' "$@"
  const unitDenied=await selector(makeQueue("unit-override"),foreignUnit);assert.equal(unitDenied.status,3);assert.equal(unitDenied.trace,"stop\n");
  const denied=await selector(makeQueue("race-bad"),incompatible,true);assert.equal(denied.status,2);assert.equal(denied.trace,"stop\nprobe\n");
  const permitted=await selector(makeQueue("race-good"),extracted,true);assert.equal(permitted.status,0,permitted.error);assert.equal(permitted.trace,"stop\nprobe\n");
+ console.log("rollback: selector и гонка stop проверены");
  const invalid=[join(dir,"missing.sqlite"),join(dir,"invalid.sqlite"),join(dir,"zero.sqlite"),join(dir,"foreign.sqlite")];
  writeFileSync(invalid[1]!,"not sqlite");writeFileSync(invalid[2]!,"");const foreign=new Database(invalid[3]!);foreign.exec("CREATE TABLE unrelated(id TEXT)");foreign.close();
  for(const file of invalid){const result=await selector(file,extracted);assert.equal(result.status,3);assert.equal(result.trace,"stop\n","Неподтверждённая очередь дошла до совместимого кандидата");}

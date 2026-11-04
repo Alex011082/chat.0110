@@ -23,15 +23,17 @@ async function nodeMcp(file:string,auth:string,home:string,origin:string){
   const seq=++id;let timer:ReturnType<typeof setTimeout>;
   const result=new Promise<any>((resolve,reject)=>{pending.set(seq,{resolve,reject});timer=setTimeout(()=>{pending.delete(seq);reject(Error(`MCP timeout: ${method}`));},12000);});
   child.stdin.write(JSON.stringify({jsonrpc:"2.0",id:seq,method,params})+"\n");
+  void child.stdin.flush();
   try{return await result;}finally{clearTimeout(timer!);}
  };
- try{await rpc("initialize",{protocolVersion:"2024-11-05",capabilities:{},clientInfo:{name:"chat0110-rollback-ci",version:"1"}});child.stdin.write(JSON.stringify({jsonrpc:"2.0",method:"notifications/initialized"})+"\n");}
+ try{await rpc("initialize",{protocolVersion:"2024-11-05",capabilities:{},clientInfo:{name:"chat0110-rollback-ci",version:"1"}});child.stdin.write(JSON.stringify({jsonrpc:"2.0",method:"notifications/initialized"})+"\n");await child.stdin.flush();}
  catch(e){child.kill();await child.exited;throw e;}
  return {rpc,close:async()=>{child.kill();await child.exited;}};
 }
 
 /** Проверяется только синтетическая копия. Конфигурация и БД работающего сервиса не читаются. */
 export async function checkChannelGuard(root:string){
+ console.error("guard: проверка синтетической очереди");
  root=resolve(root);
  const load=(name:string)=>import(pathToFileURL(join(root,"apps/api/src",name+".ts")).href);
  const [{DispatchStore},{createApp},{loadConfig},{SessionStore,importCookieKey},{Privacy}]=await Promise.all([load("dispatch"),load("http"),load("config"),load("session"),load("privacy")]);
@@ -91,11 +93,13 @@ export async function checkChannelGuard(root:string){
   assert.equal(hash(readFileSync(archive)),manifest.sha256,"MCP archive не совпал с manifest");
   const mcp=join(dir,"mcp");mkdirSync(mcp);const extracted=Bun.spawnSync(["tar","-xzf",archive,"-C",mcp]);assert.equal(extracted.exitCode,0);
   node=await nodeMcp(join(mcp,"package/mcp.mjs"),auth,join(dir,"home"),origin);
+  console.error("guard: Node MCP initialize подтверждён");
   const tools=await node.rpc("tools/list"),connectTool=tools.tools.find((t:any)=>t.name==="chat0110_connect");
   assert.ok(connectTool.inputSchema.properties.replacement_code&&connectTool.inputSchema.properties.channel_id,"MCP несовместим с перенесённым каналом");
   const invoke=async(name:string,args:any={})=>{const r=await node!.rpc("tools/call",{name,arguments:args});assert.notEqual(r.isError,true,"MCP fixture отказал");return JSON.parse(r.content[0].text);};
   const receipt=await invoke("chat0110_connect",{repo,chat_id:chat,alias:"codex",author:"codex",name:"Codex",replacement_code:permit});
   assert.equal(receipt.session_id,a.id);assert.match(receipt.channel_id,/^[a-f0-9]{64}$/);assert.equal(snapshot(db),before,"Перенос изменил очередь/историю");
+  console.error("guard: перенос с сохранением очереди подтверждён");
   assert.equal((await call("/api/agent/status",{session_id:a.id,channel_key:oldKey})).status,403);
   assert.equal((await call("/api/agent/next",{session_id:a.id,channel_key:oldKey})).status,403);
   const oldApps=await app(new Request(origin+"/mcp",{method:"POST",headers:{authorization:`Bearer ${tokens.access_token}`,"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"chat0110_status",arguments:{session_id:a.id}}})}));assert.equal((await oldApps.json()).result.isError,true);
@@ -107,6 +111,7 @@ export async function checkChannelGuard(root:string){
   assert.equal((await call("/api/agent/complete",{session_id:peer.id,task_id:two.id,claim:two.claim,text:"Synthetic peer"})).status,200);
   const three=await invoke("chat0110_next");assert.equal(three.task.step,2);await invoke("chat0110_reply",{task_id:three.task.id,text:"Synthetic final",outcome:"complete"});
   assert.equal(writes,3);assert.equal(q.chain("queue",7).status,"done");assert.equal(q.claim(a.id),null);assert.equal(q.claim(peer.id),null);
+  console.error("guard: три хода и повтор lost ack подтверждены");
   assert.equal(db.query<{n:number},[]>("SELECT COUNT(*) AS n FROM tasks WHERE chain_id='queue'").get()!.n,3);
   const history=q.task(done.id,a.id,done.claim,true);assert.equal(history.answer_id,done.answer_id);assert.equal(history.text,"Previous");
   await node.close();node=undefined;q.close();db=undefined;

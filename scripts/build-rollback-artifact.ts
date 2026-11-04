@@ -9,14 +9,17 @@ if(!ref||!/^[a-f0-9]{40}$/.test(ref))throw Error("Нужен точный fronte
 const run=async(args:string[],cwd=root)=>{const p=Bun.spawn(args,{cwd,stdout:"pipe",stderr:"pipe"});const [out,err,status]=await Promise.all([new Response(p.stdout).text(),new Response(p.stderr).text(),p.exited]);if(status)throw Error(`${args[0]}: ${err}`);return out.trim();};
 const temp=mkdtempSync(join(tmpdir(),"chat-rollback-build-"));
 try{
+ console.log("rollback: сборка прежнего frontend с текущим протоколом");
  const frontend=join(temp,"frontend"),bundle=join(temp,"bundle");mkdirSync(frontend);mkdirSync(bundle);
  // Внешний вид берём из предыдущей ревизии, протокол и MCP — из проверяемой новой.
- const archived=join(temp,"frontend.tar"),git=Bun.spawn(["git","archive","--format=tar",ref,"apps/web"],{cwd:root,stdout:"pipe",stderr:"pipe"});
- await Bun.write(archived,new Response(git.stdout));if(await git.exited)throw Error("Не удалось прочитать прежний frontend");
+ const archived=join(temp,"frontend.tar");
+ await run(["git","archive","--format=tar","--output",archived,ref,"apps/web"]);
  await run(["tar","-xf",archived,"-C",frontend]);
+ console.log("rollback: исходники frontend извлечены");
  for(const name of ["package.json","packages"])cpSync(join(root,name),join(frontend,name),{recursive:true});
  symlinkSync(join(root,"node_modules"),join(frontend,"node_modules"),"dir");
  await run([process.execPath,"run","--filter","@chat0110/web","build"],frontend);
+ console.log("rollback: сборка API/MCP bundle и manifest");
  for(const name of ["package.json","apps/api","packages/chat-protocol","deploy"]) {
   const src=join(root,name),dest=join(bundle,name);mkdirSync(dirname(dest),{recursive:true});
   cpSync(src,dest,{recursive:true,filter:path=>!path.includes("node_modules")&&!path.includes("/test/")});
