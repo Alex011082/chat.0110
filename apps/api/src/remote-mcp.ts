@@ -228,7 +228,10 @@ export function createRemoteMcp(o: Options) {
       if (typeof args.session_id !== "string" || !args.session_id.trim())
         throw badRequest("Передай session_id из chat0110_connect; если параметра нет, обнови каталог инструментов MCP");
       const author = canonicalMention(String(args.author ?? "chatgpt"));
-      dispatch.assertChannel(uid,args.session_id);
+      try{dispatch.assertChannel(uid,args.session_id);}catch(e){
+        // Чужой/неизвестный id не раскрывает существование сессии; перенесённый свой канал получает отказ.
+        if(e instanceof HttpError&&e.status===404)return {turns:[]};throw e;
+      }
       const until = Date.now() + (args.wait === true ? 25_000 : 0);
       let ready;
       const stopWaiting = args.wait === true ? dispatch.waiting(args.session_id, uid, author) : () => {};
