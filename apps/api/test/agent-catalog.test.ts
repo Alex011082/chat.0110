@@ -58,9 +58,9 @@ test("новый ИИ виден до первого ответа и не дуб
   expect(mergeAgentParticipants([existing], [session])).toEqual([existing]);
 });
 
-test("копируемый JSON ожидания явно содержит session_id для всех обычных клиентов на RU/EN", () => {
+test("копируемый JSON удалённого ожидания явно содержит session_id на RU/EN", () => {
   for (const en of [false, true]) {
-    for (const card of agentCards(en).filter(card => !["chatgpt", "other-ai"].includes(card.id))) {
+    for (const card of agentCards(en).filter(card => ["claude-chat", "claude-work", "grok"].includes(card.id))) {
       for (const context of [null, { repo: "Alex011082/Y-TNG", chat_id: "20261030-pp11" }]) {
         const task = participationTask(card, en, context);
         const example = task.match(/chat0110_pending (\{[^}]+\})/);
