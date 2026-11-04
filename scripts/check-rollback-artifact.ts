@@ -68,6 +68,8 @@ exec '${process.execPath.replaceAll("'","'\\''")}' "$@"
  };
  const makeQueue=(name:string)=>{const file=join(dir,name+".sqlite"),db=new Database(file);db.exec(schema);db.close();return file;};
  const legacy=await selector(makeQueue("legacy"),incompatible);assert.equal(legacy.status,0);assert.equal(legacy.trace,"stop\n");
+ const foreignUnit=join(dir,"foreign-unit");cpSync(extracted,foreignUnit,{recursive:true});writeFileSync(join(foreignUnit,"deploy/chat0110.service"),"[Service]\nEnvironment=CHAT0110_DISPATCH_DB=/other.sqlite\n");
+ const unitDenied=await selector(makeQueue("unit-override"),foreignUnit);assert.equal(unitDenied.status,3);assert.equal(unitDenied.trace,"stop\n");
  const denied=await selector(makeQueue("race-bad"),incompatible,true);assert.equal(denied.status,2);assert.equal(denied.trace,"stop\nprobe\n");
  const permitted=await selector(makeQueue("race-good"),extracted,true);assert.equal(permitted.status,0,permitted.error);assert.equal(permitted.trace,"stop\nprobe\n");
  const invalid=[join(dir,"missing.sqlite"),join(dir,"invalid.sqlite"),join(dir,"zero.sqlite"),join(dir,"foreign.sqlite")];
@@ -76,6 +78,6 @@ exec '${process.execPath.replaceAll("'","'\\''")}' "$@"
  assert.equal(existsSync(invalid[0]!),false,"Missing DB была создана проверкой");
  for(const override of ["direct","envfile","pass"]){const result=await selector(makeQueue("override-"+override),extracted,false,override);assert.equal(result.status,3);assert.equal(result.trace,"stop\n");}
  writeFileSync(envFile,"CHAT0110_DISPATCH_DB=/other.sqlite\n");const envDenied=await selector(makeQueue("override-content"),extracted);assert.equal(envDenied.status,3);assert.equal(envDenied.trace,"stop\n");
- const receipt={...build,...proof,archive_sha256:sha256,verified_from_archive:true,incompatible_api_rejected:true,legacy_negative_revision:legacyRevision,corrupt_archive_rejected:true,stop_before_policy_race_verified:true,unverified_queue_closed:["missing","corrupt","zero","foreign-schema"],runtime_override_closed:true};
+ const receipt={...build,...proof,archive_sha256:sha256,verified_from_archive:true,incompatible_api_rejected:true,legacy_negative_revision:legacyRevision,corrupt_archive_rejected:true,stop_before_policy_race_verified:true,unverified_queue_closed:["missing","corrupt","zero","foreign-schema"],runtime_override_closed:true,candidate_unit_override_closed:true};
  writeFileSync(join(output,"rollback-verification.json"),JSON.stringify(receipt,null,2)+"\n");console.log(JSON.stringify(receipt));
 }finally{rmSync(dir,{recursive:true,force:true});}

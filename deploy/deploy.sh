@@ -89,8 +89,10 @@ for path in root.glob(\"*.sqlite\"):
   echo 'Сервис не ответил на /health за 15 с; возвращаю предыдущий релиз:' >&2
   # При неподтверждённой совместимости не открываем старый API над новой очередью.
   sudo bash $REL/deploy/select-rollback.sh $REL \$PREVIOUS /var/lib/chat0110/dispatch.sqlite || exit 1
+  sudo cmp -s $REL/deploy/chat0110.service $REL/deploy/chat0110.service.previous || exit 1
   sudo install -m 644 -o root -g root $REL/deploy/chat0110.service.previous /etc/systemd/system/chat0110.service
   sudo systemctl daemon-reload
+  sudo python3 $REL/deploy/rollback-environment.py /etc/chat0110/chat0110.env || exit 1
   sudo ln -sfn \$PREVIOUS /opt/chat0110/.rollback-$SHA
   sudo mv -Tf /opt/chat0110/.rollback-$SHA /opt/chat0110/current
   sudo systemctl restart chat0110
