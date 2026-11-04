@@ -47,10 +47,11 @@ rsync -a --delete \
   --include='/package.json' --include='/apps/' --include='/apps/api/***' \
   --include='/apps/web/' --include='/apps/web/dist/***' \
   --include='/packages/' --include='/packages/chat-protocol/***' \
-  --include='/deploy/' --include='/deploy/chat0110.service' \
+  --include='/deploy/' --include='/deploy/chat0110.service' --include='/deploy/preserve-downloads.py' \
   --exclude='*' "$STAGE/" "$SERVER:$REL.incoming/"
 
 ssh "$SERVER" "set -euo pipefail
+  sudo python3 $REL.incoming/deploy/preserve-downloads.py /opt/chat0110/current/apps/web/dist/downloads $REL.incoming/apps/web/dist/downloads
   mkdir -p $REL.incoming/node_modules/@chat0110
   ln -sfn ../../packages/chat-protocol $REL.incoming/node_modules/@chat0110/chat-protocol
   # rsync -a переносит права локальной временной папки (на Mac — 700), а сервис

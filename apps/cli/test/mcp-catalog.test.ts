@@ -6,11 +6,16 @@ import {Client} from "@modelcontextprotocol/sdk/client/index.js";
 import {StdioClientTransport} from "@modelcontextprotocol/sdk/client/stdio.js";
 import {REMOTE_TOOLS} from "../../api/src/remote-mcp.ts";
 
+async function buildCli(root:string){
+  // Несколько in-process Bun.build подряд в Linux загрязняют кеш файлов bundler.
+  const build=Bun.spawn([process.execPath,"build",new URL("../src/mcp-cli.ts",import.meta.url).pathname,"--target=node","--format=esm","--outfile",join(root,"mcp.mjs")],{stdout:"ignore",stderr:"pipe"});
+  const error=await new Response(build.stderr).text();expect(error).not.toContain("error:");expect(await build.exited).toBe(0);
+}
+
 test("doctor отклоняет доставленную старую Apps-схему до OAuth и регистрации участника", async () => {
   const root=mkdtempSync(join(tmpdir(),"chat0110-catalog-"));
   try {
-    const built=await Bun.build({entrypoints:[new URL("../src/mcp-cli.ts",import.meta.url).pathname],target:"node",format:"esm",outdir:root,naming:"mcp.mjs"});
-    expect(built.success).toBe(true);
+    await buildCli(root);
     const catalog=join(root,"old-apps.json");
     const tool=(name:string,properties:Record<string,unknown>={},required:string[]=[])=>({name,inputSchema:{type:"object",properties,required}});
     writeFileSync(catalog,JSON.stringify({tools:[
@@ -36,7 +41,7 @@ test("doctor отклоняет доставленную старую Apps-сх�
 test("doctor принимает настоящий stdio-каталог, но не выдаёт его за готовую сессию",async()=>{
   const root=mkdtempSync(join(tmpdir(),"chat0110-local-catalog-")),client=new Client({name:"catalog-fixture",version:"1"});
   try{
-    const built=await Bun.build({entrypoints:[new URL("../src/mcp-cli.ts",import.meta.url).pathname],target:"node",format:"esm",outdir:root,naming:"mcp.mjs"});expect(built.success).toBe(true);
+    await buildCli(root);
     const entry=join(root,"mcp.mjs");
     await client.connect(new StdioClientTransport({command:"node",args:[entry,"serve","--auth-file",join(root,"unused-auth.json")],env:{CHAT0110_HOME:root,PATH:process.env.PATH!},stderr:"pipe"}));
     const local=await client.listTools();
@@ -67,7 +72,7 @@ test("setup с несовместимым сервером не меняет к�
   const paths:string[]=[],authorization:string[]=[];
   const api=Bun.serve({hostname:"127.0.0.1",port:0,fetch(req){paths.push(new URL(req.url).pathname);if(req.headers.has("authorization"))authorization.push(req.headers.get("authorization")!);return Response.json({jsonrpc:"2.0",id:1,result:{tools:[{name:"chat0110_pending",inputSchema:{type:"object",properties:{author:{type:"string"}}}}]}});}});
   try{
-    const built=await Bun.build({entrypoints:[new URL("../src/mcp-cli.ts",import.meta.url).pathname],target:"node",format:"esm",outdir:root,naming:"mcp.mjs"});expect(built.success).toBe(true);
+    await buildCli(root);
     const child=Bun.spawn(["node",join(root,"mcp.mjs"),"setup","--client","other"],{env:{...process.env,CHAT0110_HOME:root,CHAT0110_URL:`http://127.0.0.1:${api.port}`},stdout:"pipe",stderr:"pipe"});
     const [out,error,status]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);
     expect(status).toBe(1);expect(out).toBe("");expect(error).toContain("несовместим");expect(paths).toEqual(["/mcp"]);expect(authorization).toEqual([]);

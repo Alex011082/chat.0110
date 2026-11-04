@@ -29,8 +29,8 @@ export function sessionTurnInstructions(card:Pick<AgentCard,"id"|"role">,en:bool
   ? 'Subscribe to chat0110.turn.ready with {"recipient":"chatgpt"}. For each event use chat0110_take(task_id), chat0110_context(task_id,claim), then one chat0110_reply(task_id,claim,text,outcome). '
   : 'Подпишись на chat0110.turn.ready с {"recipient":"chatgpt"}. При каждом событии используй chat0110_take(task_id), chat0110_context(task_id,claim), затем один chat0110_reply(task_id,claim,text,outcome). ';
  return en
-  ? `For remote MCP, call chat0110_pending with author=${card.role}, the exact returned session_id and wait=true while the session is active. Then chat0110_take(task_id), chat0110_context(task_id,claim), and one chat0110_reply(task_id,claim,text,outcome). `
-  : `Для удалённого MCP вызывай chat0110_pending с author=${card.role}, точным session_id из connect и wait=true, пока сессия активна. Затем chat0110_take(task_id), chat0110_context(task_id,claim) и один chat0110_reply(task_id,claim,text,outcome). `;
+  ? `For remote MCP, call chat0110_pending ${JSON.stringify({author:card.role,session_id:"<session_id>",wait:true})}, replacing the placeholder with the exact returned session_id, while the session is active. Then chat0110_take(task_id), chat0110_context(task_id,claim), and one chat0110_reply(task_id,claim,text,outcome). `
+  : `Для удалённого MCP вызывай chat0110_pending ${JSON.stringify({author:card.role,session_id:"<session_id>",wait:true})}, подставив точный session_id из connect, пока сессия активна. Затем chat0110_take(task_id), chat0110_context(task_id,claim) и один chat0110_reply(task_id,claim,text,outcome). `;
 }
 export function sessionSetupTask(card:AgentCard,en:boolean,context:ChatContext):string{
  const params={...context,author:card.role,alias:`${card.id}-${context.chat_id.slice(-4)}`,name:`${card.name} · ${context.repo.split("/")[1]}`};

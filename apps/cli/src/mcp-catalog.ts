@@ -39,7 +39,7 @@ export function inspectMcpCatalog(value:unknown) {
     requireTool("chat0110_next");
     for(const name of ["next","context","status"]){
       const required=tools.get(`chat0110_${name}`)?.inputSchema?.required;
-      if(Array.isArray(required)&&required.length)missing.push(`chat0110_${name}.stateful`);
+      if(required!==undefined&&(!Array.isArray(required)||required.length))missing.push(`chat0110_${name}.stateful`);
     }
     accepts("chat0110_set_auto_reply",["enabled"]);accepts("chat0110_reply",["task_id","text","outcome"]);
   }
