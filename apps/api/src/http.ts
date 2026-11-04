@@ -550,16 +550,19 @@ export async function createApp(deps: AppDeps): Promise<App> {
       dispatch.heartbeat(task.id, session.id, String(body.claim));
       return json(200, { ok: true });
     }
-    if (path === "/api/agent/context") return json(200, await getTimeline(gh, repo, session.chat, privacy));
+    if (path === "/api/agent/context") {
+      const timeline=await getTimeline(gh,repo,session.chat,privacy);assertChannel();return json(200,timeline);
+    }
     if (path === "/api/agent/complete") {
       if (typeof body.text !== "string" || !body.text.trim() || body.text.length > 60_000)
         throw badRequest("Нужен ответ до 60000 знаков");
       // Одинаковый id и сохранённый текст делают повтор после обрыва безопасным.
       body.text = (await privacy.scan(body.text.replace(/\r\n?/g, "\n").trim())).text;
       assertChannel();
-      dispatch.prepareAnswer(task.id, session.id, String(body.claim), body.text as string, body.outcome === undefined ? "continue" : String(body.outcome));
       const pull = await gh.findChatPull(repo, session.chat);
       if (!pull || pull.state !== "open") throw new HttpError(409, "conflict", "Чат закрыт");
+      const release=dispatch.beginPublication(user.id,session.id,body.channel_key,task.id,String(body.claim),body.text as string,body.outcome===undefined?"continue":String(body.outcome));
+      try{
       const item = await postMessage(
         ctx,
         repo,
@@ -570,6 +573,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
       dispatch.finish(task.id, String(body.claim), item.id);
       hub.publish(session.repo, "chat.updated", { repo: session.repo, chat_id: session.chat, number: null });
       return json(200, { item });
+      }finally{release();}
     }
     throw notFound("Неизвестный метод коннектора");
   }

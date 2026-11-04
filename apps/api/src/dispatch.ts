@@ -50,6 +50,7 @@ export class DispatchStore {
   private db: Database;
   private waiters = new Map<string, number>();
   private replacements:ChannelReplacements;
+  private publishing=new Set<string>();
   constructor(path: string | Database) {
     this.db = typeof path === "string" ? new Database(path, { create: true }) : path;
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
@@ -370,11 +371,23 @@ export class DispatchStore {
     this.db.query("UPDATE tasks SET text=?,outcome=? WHERE id=?").run(text, outcome, id);
     return t;
   }
+  beginPublication(uid:number,session:string,key:unknown,id:string,claim:string,text:string,outcome="continue"):()=>void {
+    if(this.publishing.has(id))throw new HttpError(409,"conflict","Этот ответ уже публикуется; дождитесь квитанции");
+    this.db.transaction(()=>{
+      this.assertChannel(uid,session,key);
+      this.prepareAnswer(id,session,claim,text,outcome);
+      this.db.query("INSERT OR IGNORE INTO channel_publications VALUES (?,?)").run(id,session);
+    }).immediate();
+    this.publishing.add(id);
+    // После ошибки остаётся SQLite-квитанция неопределённой публикации. Только finish снимает её.
+    return ()=>{this.publishing.delete(id);};
+  }
   finish(id: string, claim: string, answerId: string) {
     this.db.transaction(() => {
       this.expire();
       const t = this.db.query<Task, [string]>("SELECT * FROM tasks WHERE id=?").get(id);
       if (!t || t.claim !== claim) throw forbidden("Неверный исполнитель хода");
+      this.db.query("DELETE FROM channel_publications WHERE task_id=?").run(id);
       if (t.status === "done") return;
       const c = this.db.query<ChainRow, [string]>("SELECT * FROM chains WHERE id=?").get(t.chain_id)!;
       // Поздний опубликованный ответ сохраняется, но не оживляет остановленную цепочку.

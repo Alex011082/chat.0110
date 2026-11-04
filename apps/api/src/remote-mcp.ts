@@ -276,13 +276,16 @@ export function createRemoteMcp(o: Options) {
     dispatch.task(id, task.session_id, String(args.claim), name === "chat0110_reply");
     if (name === "chat0110_context") {
       dispatch.heartbeat(id, task.session_id, String(args.claim));
-      return { prompt: (await privacy.scan(task.prompt)).text, reply_to: task.reply_to, timeline: await getTimeline(gh, repo, task.chat, privacy) };
+      const prompt=(await privacy.scan(task.prompt)).text;dispatch.assertChannel(uid,task.session_id);
+      const timeline=await getTimeline(gh,repo,task.chat,privacy);dispatch.assertChannel(uid,task.session_id);
+      return {prompt,reply_to:task.reply_to,timeline};
     }
     if (name === "chat0110_reply") {
       if (typeof args.text !== "string" || !args.text.trim() || args.text.length > 60_000)
         throw badRequest("Нужен ответ до 60000 знаков");
       args.text = (await privacy.scan(args.text.replace(/\r\n?/g, "\n").trim())).text;
-      dispatch.prepareAnswer(id, task.session_id, String(args.claim), args.text as string, args.outcome === undefined ? "continue" : String(args.outcome));
+      const release=dispatch.beginPublication(uid,task.session_id,undefined,id,String(args.claim),args.text as string,args.outcome===undefined?"continue":String(args.outcome));
+      try{
       const item = await postMessage(
         { gh, user: { login: p.session.login, id: uid }, privacy },
         repo,
@@ -294,6 +297,7 @@ export function createRemoteMcp(o: Options) {
       hub.publish(task.repo, "chat.updated", { repo: task.repo, chat_id: task.chat, number: null });
       void pump();
       return { item };
+      }finally{release();}
     }
     throw notFound("Неизвестный инструмент");
   }

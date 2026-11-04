@@ -157,6 +157,7 @@ test("новое разрешение требует новую идентичн
   expect((await f.issue()).status).toBe(201);expect((await f.connect()).status).toBe(200);
   const nextCode="c3".repeat(32);expect((await f.issue(nextCode)).status).toBe(201);
   expect((await f.connect({replacement_code:nextCode})).status).toBe(409);
+  expect((await f.connect({replacement_code:nextCode,session_id:"66666666-7777-4888-8999-aaaaaaaaaaaa"})).status).toBe(409);
   expect((await f.post("/api/agent/status",{session_id:f.old.id,channel_key:key})).status).toBe(200);
  }finally{f.db.close();}
 });
@@ -191,4 +192,19 @@ test("публикация повторного done блокирует заме
   release();expect((await pending).status).toBe(200);expect((await f.connect()).status).toBe(200);
   expect(f.fake.find("PUT",/\/contents\//)).toHaveLength(1);
  }finally{release();if(pending)await pending;f.db.close();}
+});
+
+test("неопределённая публикация переживает restart; сверяется только тот же ответ",()=>{
+ const root=mkdtempSync(join(tmpdir(),"chat-publishing-")),file=join(root,"q.sqlite");let q=new DispatchStore(file);
+ try{
+  const a=q.register(7,repo,chat,"remote:old","codex","Codex","codex");q.enqueue("done-publish",7,repo,chat,"m","q",[a.id]);const t=q.claim(a.id)!;
+  q.prepareAnswer(t.id,a.id,t.claim!,"Done");q.finish(t.id,t.claim!,t.answer_id);
+  const end=q.beginPublication(7,a.id,undefined,t.id,t.claim!,"Done");end();q.close();q=new DispatchStore(file);
+  q.issueChannelReplacement(7,a.id,code);expect(()=>q.replaceChannel(7,repo,chat,"codex","codex",external,key,code)).toThrow();
+  expect(()=>q.beginPublication(7,a.id,undefined,t.id,t.claim!,"Different")).toThrow();
+  const retried=q.beginPublication(7,a.id,undefined,t.id,t.claim!,"Done");
+  q.finish(t.id,t.claim!,t.answer_id);retried();
+  expect(q.replaceChannel(7,repo,chat,"codex","codex",external,key,code).id).toBe(a.id);
+  expect(q.task(t.id,a.id,t.claim!,true)).toMatchObject({text:"Done",status:"done",answer_id:t.answer_id});
+ }finally{q.close();rmSync(root,{recursive:true,force:true});}
 });

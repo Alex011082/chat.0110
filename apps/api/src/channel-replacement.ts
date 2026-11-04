@@ -11,6 +11,7 @@ interface Permit {code_hash:string;session_id:string;uid:number;expected_externa
 export class ChannelReplacements {
  constructor(private db:Database){
   db.exec(`CREATE TABLE IF NOT EXISTS channel_bindings (session_id TEXT PRIMARY KEY,key_hash TEXT NOT NULL);
+   CREATE TABLE IF NOT EXISTS channel_publications (task_id TEXT PRIMARY KEY,session_id TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS channel_replacements (code_hash TEXT PRIMARY KEY,session_id TEXT NOT NULL,uid INTEGER NOT NULL,expected_external TEXT NOT NULL,expires INTEGER NOT NULL,used_external TEXT,key_hash TEXT)`);
  }
  private session(uid:number,id:string):SessionRow{
@@ -48,9 +49,12 @@ export class ChannelReplacements {
     this.assert(uid,s.id,key);return {session:s,changed:false};
    }
    if(permit.expires<=Date.now()||s.external!==permit.expected_external)throw new HttpError(409,"conflict","Разрешение истекло или привязка уже изменилась");
+   const binding=this.db.query<{key_hash:string},[string]>("SELECT key_hash FROM channel_bindings WHERE session_id=?").get(s.id);
+   if(s.external===external||binding?.key_hash===keyHash)throw new HttpError(409,"conflict","Новый канал должен иметь собственные идентичность и ключ");
    // Даже Stop/expiry не доказывает, что внешнее действие или публикация не состоялись.
    if(this.db.query("SELECT id FROM tasks WHERE session_id=? AND claim IS NOT NULL AND status!='done' LIMIT 1").get(s.id))
     throw new HttpError(409,"conflict","Есть взятое задание с неподтверждённым исходом. Сначала сверьте результат; повторная выдача запрещена");
+   if(this.db.query("SELECT task_id FROM channel_publications WHERE session_id=? LIMIT 1").get(s.id))throw new HttpError(409,"conflict","Публикация ответа ещё не подтверждена. Сначала сверьте результат прежнего канала");
    if(this.db.query("SELECT id FROM sessions WHERE uid=? AND repo=? AND chat=? AND external=? AND id!=?").get(uid,s.repo,s.chat,external,s.id))throw new HttpError(409,"conflict","Новый канал уже занят другим участником");
    this.db.query("UPDATE sessions SET external=?,seen=0,auto_generation=auto_generation+1 WHERE id=?").run(external,s.id);
    this.db.query("INSERT INTO channel_bindings VALUES (?,?) ON CONFLICT(session_id) DO UPDATE SET key_hash=excluded.key_hash").run(s.id,keyHash);
