@@ -18,6 +18,8 @@ try{
  console.log("rollback: исходники frontend извлечены");
  for(const name of ["package.json","packages"])cpSync(join(root,name),join(frontend,name),{recursive:true});
  symlinkSync(join(root,"node_modules"),join(frontend,"node_modules"),"dir");
+ // Bun хранит зависимости workspace рядом с web, а не в корневом node_modules.
+ symlinkSync(join(root,"apps/web/node_modules"),join(frontend,"apps/web/node_modules"),"dir");
  await run([process.execPath,"run","build"],join(frontend,"apps/web"));
  console.log("rollback: сборка API/MCP bundle и manifest");
  for(const name of ["package.json","apps/api","packages/chat-protocol","deploy"]) {
