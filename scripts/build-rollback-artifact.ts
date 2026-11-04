@@ -6,7 +6,7 @@ import {MCP_PACKAGE_VERSION} from "../packages/chat-protocol/src/mcp-install.ts"
 
 const root=resolve(import.meta.dir,".."),ref=process.argv[2],output=resolve(process.argv[3]??"artifacts");
 if(!ref||!/^[a-f0-9]{40}$/.test(ref))throw Error("Нужен точный frontend SHA");
-const run=async(args:string[],cwd=root)=>{const p=Bun.spawn(args,{cwd,stdout:"pipe",stderr:"pipe"});const [out,err,status]=await Promise.all([new Response(p.stdout).text(),new Response(p.stderr).text(),p.exited]);if(status)throw Error(`${args[0]}: ${err}`);return out.trim();};
+const run=async(args:string[],cwd=root)=>{const p=Bun.spawn(args,{cwd,stdout:"pipe",stderr:"pipe"});const [out,err,status]=await Promise.all([new Response(p.stdout).text(),new Response(p.stderr).text(),p.exited]);if(status)throw Error(`${args.join(" ")}: ${err}\n${out}`);return out.trim();};
 const temp=mkdtempSync(join(tmpdir(),"chat-rollback-build-"));
 try{
  console.log("rollback: сборка прежнего frontend с текущим протоколом");
@@ -18,7 +18,7 @@ try{
  console.log("rollback: исходники frontend извлечены");
  for(const name of ["package.json","packages"])cpSync(join(root,name),join(frontend,name),{recursive:true});
  symlinkSync(join(root,"node_modules"),join(frontend,"node_modules"),"dir");
- await run([process.execPath,"run","--filter","@chat0110/web","build"],frontend);
+ await run([process.execPath,"run","build"],join(frontend,"apps/web"));
  console.log("rollback: сборка API/MCP bundle и manifest");
  for(const name of ["package.json","apps/api","packages/chat-protocol","deploy"]) {
   const src=join(root,name),dest=join(bundle,name);mkdirSync(dirname(dest),{recursive:true});

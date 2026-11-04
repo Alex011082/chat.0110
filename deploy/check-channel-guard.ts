@@ -66,7 +66,7 @@ export async function checkChannelGuard(root:string){
   const a=seed.register(7,repo,chat,"remote:chatgpt:7:codex","codex","Codex","codex","fixture");
   const peer=seed.register(7,repo,chat,"peer","claude","Claude","claude","fixture");
   seed.enqueue("history",7,repo,chat,"20261104T000000Z-artifact-owner-abcd","previous",[a.id]);
-  const done=seed.claim(a.id);seed.prepareAnswer(done.id,a.id,done.claim,"Previous");seed.finish(done.id,done.claim,done.answer_id);
+  const done=seed.claimRequest(a.id,"history-pull");seed.prepareAnswer(done.id,a.id,done.claim,"Previous");seed.finish(done.id,done.claim,done.answer_id);
   seed.enqueue("queue",7,repo,chat,"20261104T000001Z-artifact-owner-abcd","synthetic request",[a.id,peer.id,a.id]);
   const initialCode=random();seed.issueChannelReplacement(7,a.id,initialCode);seed.replaceChannel(7,repo,chat,"codex","codex","11111111-2222-4333-8444-555555555555",oldKey,initialCode);
   const sourceBytes=source.serialize(),before=snapshot(source);seed.close();
