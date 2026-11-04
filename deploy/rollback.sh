@@ -26,7 +26,7 @@ switch_to() {
 }
 sudo install -m 644 -o root -g root "$target/deploy/chat0110.service" /etc/systemd/system/chat0110.service
 sudo systemctl daemon-reload
-sudo python3 "$2/deploy/rollback-environment.py" /etc/chat0110/chat0110.env
+sudo python3 "$2/deploy/rollback-environment.py" /etc/chat0110/chat0110.env "$2/deploy/chat0110.service"
 switch_to "$target"
 if sudo systemctl restart chat0110; then
   for i in $(seq 1 15); do
@@ -42,7 +42,7 @@ sudo bash "$2/deploy/select-rollback.sh" "$2" "$previous" /var/lib/chat0110/disp
 sudo cmp -s "$2/deploy/chat0110.service" "$service_copy"
 sudo install -m 644 -o root -g root "$service_copy" /etc/systemd/system/chat0110.service
 sudo systemctl daemon-reload
-sudo python3 "$2/deploy/rollback-environment.py" /etc/chat0110/chat0110.env
+sudo python3 "$2/deploy/rollback-environment.py" /etc/chat0110/chat0110.env "$2/deploy/chat0110.service"
 switch_to "$previous"
 sudo systemctl restart chat0110
 echo 'Откат не прошёл health; возвращён исходный указатель релиза' >&2

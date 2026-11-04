@@ -9,6 +9,10 @@ try:
     file = pathlib.Path(sys.argv[1])
     def setting(name):
         return subprocess.run(["systemctl", "show", "chat0110", "--property=" + name, "--value"], check=True, capture_output=True, text=True).stdout.strip()
+    if setting("DropInPaths") or setting("NeedDaemonReload") != "no":
+        raise ValueError("Нестандартный или не загруженный unit")
+    if pathlib.Path(setting("FragmentPath")).read_bytes() != pathlib.Path(sys.argv[2]).read_bytes():
+        raise ValueError("Текущий unit не подтверждён")
     if setting("EnvironmentFiles") != str(file) + " (ignore_errors=no)" or setting("PassEnvironment"):
         raise ValueError("Нестандартное окружение")
     direct = shlex.split(setting("Environment"))

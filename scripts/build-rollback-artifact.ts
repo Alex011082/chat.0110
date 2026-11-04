@@ -12,7 +12,7 @@ try{
  const frontend=join(temp,"frontend"),bundle=join(temp,"bundle");mkdirSync(frontend);mkdirSync(bundle);
  // Внешний вид берём из предыдущей ревизии, протокол и MCP — из проверяемой новой.
  const archived=join(temp,"frontend.tar"),git=Bun.spawn(["git","archive","--format=tar",ref,"apps/web"],{cwd:root,stdout:"pipe",stderr:"pipe"});
- await Bun.write(archived,git.stdout);if(await git.exited)throw Error("Не удалось прочитать прежний frontend");
+ await Bun.write(archived,new Response(git.stdout));if(await git.exited)throw Error("Не удалось прочитать прежний frontend");
  await run(["tar","-xf",archived,"-C",frontend]);
  for(const name of ["package.json","packages"])cpSync(join(root,name),join(frontend,name),{recursive:true});
  symlinkSync(join(root,"node_modules"),join(frontend,"node_modules"),"dir");

@@ -25,7 +25,7 @@ try{
  rmSync(join(incompatible,"apps/api/src"),{recursive:true});
  const legacyRevision="b690559660c4e3920e2a21dac35c8982b1801e13";
  const oldTar=join(dir,"old-api.tar"),git=Bun.spawn(["git","archive","--format=tar",legacyRevision,"apps/api/src"],{stdout:"pipe",stderr:"pipe"});
- await Bun.write(oldTar,git.stdout);assert.equal(await git.exited,0);await okay(["tar","-xf",oldTar,"-C",incompatible]);
+ await Bun.write(oldTar,new Response(git.stdout));assert.equal(await git.exited,0);await okay(["tar","-xf",oldTar,"-C",incompatible]);
  await assert.rejects(()=>checkChannelGuard(incompatible));
  const changed=join(dir,"changed");cpSync(extracted,changed,{recursive:true});
  writeFileSync(join(changed,"apps/api/src/dispatch.ts"),"invalid synthetic file\n");
@@ -40,10 +40,13 @@ try{
  writeFileSync(join(bin,"systemctl"),`#!/usr/bin/env python3
 import os,sqlite3,sys
 if sys.argv[1] == "show":
-    values={"EnvironmentFiles":os.environ["GUARD_ENVFILE"]+" (ignore_errors=no)","PassEnvironment":"", "Environment":"CHAT0110_PUBLIC_URL=https://chat.0110.digital"}
+    values={"EnvironmentFiles":os.environ["GUARD_ENVFILE"]+" (ignore_errors=no)","PassEnvironment":"", "Environment":"CHAT0110_PUBLIC_URL=https://chat.0110.digital", "DropInPaths":"", "NeedDaemonReload":"no", "FragmentPath":os.environ["GUARD_UNITFILE"]}
     if os.environ.get("GUARD_OVERRIDE") == "direct": values["Environment"] += " CHAT0110_DISPATCH_DB=/other.sqlite"
     if os.environ.get("GUARD_OVERRIDE") == "envfile": values["EnvironmentFiles"] += " /other.env (ignore_errors=no)"
     if os.environ.get("GUARD_OVERRIDE") == "pass": values["PassEnvironment"] = "CHAT0110_DISPATCH_DB"
+    if os.environ.get("GUARD_OVERRIDE") == "dropin": values["DropInPaths"] = "/etc/systemd/system/chat0110.service.d/override.conf"
+    if os.environ.get("GUARD_OVERRIDE") == "unloaded": values["NeedDaemonReload"] = "yes"
+    if os.environ.get("GUARD_OVERRIDE") == "fragment": values["FragmentPath"] = os.environ["GUARD_ENVFILE"]
     print(values[sys.argv[3].split("=",1)[1]])
     sys.exit(0)
 assert sys.argv[1:] == ["stop","chat0110"]
@@ -63,7 +66,7 @@ exec '${process.execPath.replaceAll("'","'\\''")}' "$@"
  CREATE TABLE agent_pulls(session_id TEXT,request_id TEXT,task_id TEXT);
  CREATE TABLE channel_bindings(session_id TEXT,key_hash TEXT);`;
  const selector=async(file:string,target:string,race=false,override="")=>{
-  writeFileSync(trace,"");const r=await run(["bash",join(extracted,"deploy/select-rollback.sh"),extracted,target,file,envFile],{...process.env,PATH:bin+":"+process.env.PATH,GUARD_TRACE:trace,GUARD_DATABASE:file,GUARD_ENVFILE:envFile,GUARD_OVERRIDE:override,GUARD_RACE:race?"1":"0"});
+  writeFileSync(trace,"");const r=await run(["bash",join(extracted,"deploy/select-rollback.sh"),extracted,target,file,envFile],{...process.env,PATH:bin+":"+process.env.PATH,GUARD_TRACE:trace,GUARD_DATABASE:file,GUARD_ENVFILE:envFile,GUARD_UNITFILE:join(extracted,"deploy/chat0110.service"),GUARD_OVERRIDE:override,GUARD_RACE:race?"1":"0"});
   return {...r,trace:readFileSync(trace,"utf8")};
  };
  const makeQueue=(name:string)=>{const file=join(dir,name+".sqlite"),db=new Database(file);db.exec(schema);db.close();return file;};
@@ -76,7 +79,7 @@ exec '${process.execPath.replaceAll("'","'\\''")}' "$@"
  writeFileSync(invalid[1]!,"not sqlite");writeFileSync(invalid[2]!,"");const foreign=new Database(invalid[3]!);foreign.exec("CREATE TABLE unrelated(id TEXT)");foreign.close();
  for(const file of invalid){const result=await selector(file,extracted);assert.equal(result.status,3);assert.equal(result.trace,"stop\n","Неподтверждённая очередь дошла до совместимого кандидата");}
  assert.equal(existsSync(invalid[0]!),false,"Missing DB была создана проверкой");
- for(const override of ["direct","envfile","pass"]){const result=await selector(makeQueue("override-"+override),extracted,false,override);assert.equal(result.status,3);assert.equal(result.trace,"stop\n");}
+ for(const override of ["direct","envfile","pass","dropin","unloaded","fragment"]){const result=await selector(makeQueue("override-"+override),extracted,false,override);assert.equal(result.status,3);assert.equal(result.trace,"stop\n");}
  writeFileSync(envFile,"CHAT0110_DISPATCH_DB=/other.sqlite\n");const envDenied=await selector(makeQueue("override-content"),extracted);assert.equal(envDenied.status,3);assert.equal(envDenied.trace,"stop\n");
  const receipt={...build,...proof,archive_sha256:sha256,verified_from_archive:true,incompatible_api_rejected:true,legacy_negative_revision:legacyRevision,corrupt_archive_rejected:true,stop_before_policy_race_verified:true,unverified_queue_closed:["missing","corrupt","zero","foreign-schema"],runtime_override_closed:true,candidate_unit_override_closed:true};
  writeFileSync(join(output,"rollback-verification.json"),JSON.stringify(receipt,null,2)+"\n");console.log(JSON.stringify(receipt));
