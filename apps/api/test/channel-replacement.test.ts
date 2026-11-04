@@ -9,10 +9,11 @@ import {testPrivacy} from "./privacy-fixture.ts";
 import {mkdtempSync,rmSync} from "node:fs";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
+import {Privacy} from "../src/privacy.ts";
 
 const base="https://chat.0110.digital",repo="Alex011082/chat.0110",chat="20261023-k7q2";
 const code="a1".repeat(32),key="b2".repeat(32),external="11111111-2222-4333-8444-555555555555";
-async function fixture(){
+async function fixture(privacy=testPrivacy){
  const db=new Database(":memory:"),dispatch=new DispatchStore(db);
  const config=loadConfig({CHAT0110_PUBLIC_URL:base,GITHUB_APP_CLIENT_ID:"client",GITHUB_APP_CLIENT_SECRET:"fixture",GITHUB_APP_SLUG:"chat",GITHUB_WEBHOOK_SECRET:"hook",CHAT0110_COOKIE_KEY:"07".repeat(32)});
  const fake=new FakeGitHub().on("GET","/user",({headers})=>({body:{id:headers.get("authorization")==="Bearer ghu_other"?8:7,login:headers.get("authorization")==="Bearer ghu_other"?"Other":"Alex011082"}}))
@@ -20,7 +21,7 @@ async function fixture(){
  const pull=(author="Alex011082",state="open")=>fake.on("GET",/\/pulls\?state=all&head=/,{body:[{number:1,title:"Chat",body:`<!-- chat0110\nchat_id: ${chat}\n-->`,state,draft:true,head:{ref:`chat/${chat}`,sha:"h",repo:{full_name:repo}},base:{ref:"main"},user:{login:author}}]});pull();
  const sessions=new SessionStore({key:await importCookieKey(config.cookieKey),dev:false,clientId:"client",clientSecret:"fixture",fetch:fake.fetch});
  const cookie=(await sessions.cookieFor({uid:7,login:"Alex011082",at:"ghu_fixture",rt:"",exp:Date.now()+3600000,rexp:Date.now()+86400000})).split(";")[0]!;
- const app=await createApp({config,stateDb:db,dispatch,sessions,privacy:testPrivacy,fetch:fake.fetch});
+ const app=await createApp({config,stateDb:db,dispatch,sessions,privacy,fetch:fake.fetch});
  const post=(path:string,body:unknown,owner=false,token="ghu_fixture")=>app(new Request(base+path,{method:"POST",headers:{"content-type":"application/json",origin:base,...(owner?{cookie}:{authorization:`Bearer ${token}`})},body:JSON.stringify(body)}));
  const old=dispatch.register(7,repo,chat,"remote:chatgpt:7:codex","codex","Мой Кодекс","codex","sol");
  const issue=(c=code,id=old.id)=>post(`/api/chats/${repo}/${chat}/channel-replacement`,{session_id:id,code:c},true);
@@ -207,4 +208,16 @@ test("неопределённая публикация переживает res
   expect(q.replaceChannel(7,repo,chat,"codex","codex",external,key,code).id).toBe(a.id);
   expect(q.task(t.id,a.id,t.claim!,true)).toMatchObject({text:"Done",status:"done",answer_id:t.answer_id});
  }finally{q.close();rmSync(root,{recursive:true,force:true});}
+});
+
+test("повтор next, задержанный в сканере до done и замены, не возвращает старому каналу claim",async()=>{
+ let release=()=>{},entered=()=>{};const gate=new Promise<void>(r=>{entered=r;}),held=new Promise<void>(r=>{release=r;});
+ const f=await fixture(new Privacy(async text=>{if(text==="held-next"){entered();await held;}return [];}));let pending:Promise<Response>|undefined;
+ try{
+  f.dispatch.enqueue("held",7,repo,chat,"m","held-next",[f.old.id]);const t=f.dispatch.claimRequest(f.old.id,"known")!;
+  pending=f.post("/api/agent/next",{session_id:f.old.id,request_id:"known"});await gate;
+  f.dispatch.prepareAnswer(t.id,f.old.id,t.claim!,"Done");f.dispatch.finish(t.id,t.claim!,t.answer_id);
+  expect((await f.issue()).status).toBe(201);expect((await f.connect()).status).toBe(200);
+  release();expect((await pending).status).toBe(403);
+ }finally{release();if(pending)await pending;f.db.close();}
 });

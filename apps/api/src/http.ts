@@ -535,7 +535,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
       } finally { stopWaiting(); req.signal.removeEventListener("abort", stopWaiting); }
       if (!task) return json(200, { task: null });
       const chain = dispatch.chain(task.chain_id, user.id)!;
-      return json(200, {
+      const payload={
         task: await privacy.object(task),
         prompt: (await privacy.scan(chain.prompt)).text,
         repo: session.repo,
@@ -543,7 +543,8 @@ export async function createApp(deps: AppDeps): Promise<App> {
         url: `${config.publicUrl}/${session.repo}/${session.chat}`,
         final: task.step === JSON.parse(chain.route).length - 1,
         expires_at: chain.expires_at,
-      });
+      };
+      assertChannel();return json(200,payload);
     }
     const task = dispatch.task(String(body.task_id), session.id, String(body.claim), path === "/api/agent/complete");
     if (path === "/api/agent/heartbeat") {

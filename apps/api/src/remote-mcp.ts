@@ -260,7 +260,7 @@ export function createRemoteMcp(o: Options) {
       dispatch.touch(task.session_id);
       dispatch.heartbeat(id, task.session_id, claimed.claim!);
       const chain=dispatch.chain(task.chain_id,uid)!;
-      return {
+      const payload={
         task_id: id,
         step: task.step,
         final: task.step === JSON.parse(chain.route).length - 1,
@@ -272,6 +272,7 @@ export function createRemoteMcp(o: Options) {
         repo: task.repo,
         chat_id: task.chat,
       };
+      dispatch.assertChannel(uid,task.session_id);return payload;
     }
     dispatch.task(id, task.session_id, String(args.claim), name === "chat0110_reply");
     if (name === "chat0110_context") {
