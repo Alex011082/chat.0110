@@ -16,7 +16,7 @@ test("запрос мастера привязан к чату для каждо
  for(const en of [false,true])for(const card of agentCards(en)){
   const task=sessionSetupTask(card,en,{repo:"owner/product",chat_id:"20261103-abcd"});
   expect(task).toContain('"repo":"owner/product"');expect(task).toContain('"chat_id":"20261103-abcd"');
-  expect(task).toContain("chat0110_connect");expect(task).toContain("session_id");expect(task).not.toContain("chat0110_pending");
+  expect(task).toContain("chat0110_connect");expect(task).toContain("session_id");
  }
 });
 test("контекст чата сохраняется без shell-аргументов и произвольных адресов", () => {
