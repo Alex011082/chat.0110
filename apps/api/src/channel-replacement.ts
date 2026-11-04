@@ -40,7 +40,7 @@ export class ChannelReplacements {
  replace(uid:number,repo:string,chat:string,alias:string,author:string,external:string,key:unknown,code:unknown):{session:SessionRow;changed:boolean}{
   if(!valid(code)||!valid(key)||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(external))throw badRequest("Неверное доказательство нового канала");
   return this.db.transaction(()=>{
-   const hash=digest(code),keyHash=digest(key),permit=this.db.query<Permit,[string]>("SELECT * FROM channel_replacements WHERE code_hash=? AND uid=?").get(hash,uid);
+   const hash=digest(code),keyHash=digest(key),permit=this.db.query<Permit,[string,number]>("SELECT * FROM channel_replacements WHERE code_hash=? AND uid=?").get(hash,uid);
    if(!permit)throw new HttpError(409,"conflict","Нет разрешения владельца на замену этого канала");
    const s=this.session(uid,permit.session_id);
    if(s.repo!==repo.toLowerCase()||s.chat!==chat||s.alias!==alias.toLowerCase()||s.author!==author)throw forbidden("Разрешение выдано другому участнику или чату");
