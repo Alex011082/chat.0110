@@ -3,7 +3,7 @@ import { canonicalMention, MCP_PACKAGE_VERSION } from "@chat0110/chat-protocol";
 import { ActionKey, Body, Key, Lamp, Mark, Screen } from "../ui/kit.tsx";
 import { LanguageSwitch } from "../ui/LanguageSwitch.tsx";
 import { agentCards, endpoint,type ChatContext } from "../lib/agent-catalog.ts";
-import { connectContext, mcpSetupCommand, mcpPackageUrl,sessionSetupTask } from "../lib/mcp-setup.ts";
+import { connectContext, mcpSetupCommand, mcpPackageUrl,sessionSetupTask,terminalClient } from "../lib/mcp-setup.ts";
 import { dispatchRequest } from "../dispatch.ts";
 import { api } from "../api.ts";
 import type { AutoReplyView } from "../lib/auto-replies.ts";
@@ -22,9 +22,12 @@ export function ConnectAgents({chatContext,initialClient,embedded=false}:{chatCo
     return initialClient??(hash === "claude" ? "claude-code" : hash || "codex");
   });
   const cards = agentCards(en), card = cards.find(c => c.id === selected) ?? cards.find(c => c.id === "codex")!;
-  const command = mcpSetupCommand(card), terminal = !!command;
+  const [transport,setTransport]=useState<"remote"|"local">("remote");
+  const command = mcpSetupCommand(card,transport), terminal = !!command;
   const [connections, setConnections] = useState<Connections | null>(null);
-  const [view, setView] = useState<AutoReplyView | null>(null);
+  const [viewData, setView] = useState<{key:string;value:AutoReplyView} | null>(null);
+  const contextKey=context?`${context.repo}/${context.chat_id}`:"";
+  const view=viewData?.key===contextKey?viewData.value:null;
   const [error, setError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [copied, setCopied] = useState("");
@@ -33,6 +36,7 @@ export function ConnectAgents({chatContext,initialClient,embedded=false}:{chatCo
   const [probeError, setProbeError] = useState(false);
   const [probeMessage, setProbeMessage] = useState<string | null>(null);
   const [sessionChoice, setSessionChoice] = useState("");
+  useEffect(()=>{setSessionChoice("");setCopied("");setProbeMessage(null);setProbeError(false);},[contextKey]);
   const pendingProbe = useRef<{ key: string; request_id: string; text: string } | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const back = context ? `/${context.repo}/${context.chat_id}` : "/";
@@ -44,7 +48,7 @@ export function ConnectAgents({chatContext,initialClient,embedded=false}:{chatCo
       if (!response.ok) throw Error("status");
       const value = await response.json();
       const state = context ? await dispatchRequest(`${context.repo}/${context.chat_id}`) : null;
-      if (!signal?.aborted) { setConnections(value); setView(state as AutoReplyView | null); setError(false); }
+      if (!signal?.aborted) { setConnections(value); setView(state&&context?{key:`${context.repo}/${context.chat_id}`,value:state as AutoReplyView}:null); setError(false); }
     } catch { if (!signal?.aborted) setError(true); }
   }, [context]);
   useEffect(() => {
@@ -54,7 +58,10 @@ export function ConnectAgents({chatContext,initialClient,embedded=false}:{chatCo
     return () => { abort.abort(); clearInterval(timer); if (copyTimer.current) clearTimeout(copyTimer.current); };
   }, [refresh]);
   const sessions = view?.sessions.filter(session => card.id === "other-ai" ? !["codex", "claude", "chatgpt", "grok"].includes(canonicalMention(session.author)) : canonicalMention(session.author) === card.role) ?? [];
-  const target = sessions.find(session => session.id === sessionChoice) ?? (sessions.length === 1 ? sessions[0] : null);
+  const target = sessionChoice==="new"?null:sessions.find(session => session.id === sessionChoice) ?? (!sessionChoice&&sessions.length === 1 ? sessions[0] : null);
+  let request="";
+  try{if(context)request=sessionSetupTask(card,en,context,{transport,...(target?{existing:target}:sessionChoice==="new"?{newParticipant:true}:{})});}catch{/* Не превращаем некорректную identity в новый connect. */}
+  const canCopy=!!context&&!!view&&!error&&!!request&&(!!target||sessionChoice==="new")&&!(terminal&&target);
   const chain = view?.chains.find(c => c.message_id === probeMessage);
   const authorized = terminal ? connections?.local?.authorized : card.id === "chatgpt" ? connections?.chatgpt.authorized : null;
   const copy = async (id: string, text: string) => {
@@ -89,41 +96,43 @@ export function ConnectAgents({chatContext,initialClient,embedded=false}:{chatCo
         </header>:null}
         <div>
           <h1 className="m-0 text-title font-semibold tracking-[-0.03em]">{en ? "Connect your AI" : "Подключить ИИ"}</h1>
-          <p className="mb-0 mt-3 text-copy text-ink-2">{en ? "Choose your app. Install the MCP server once and authorize access to CHAT.0110." : "Выбери приложение. Один раз установи MCP-сервер и разреши доступ к CHAT.0110."}</p>
+          <p className="mb-0 mt-3 text-copy text-ink-2">{en ? "Choose your app and connect the shared remote MCP with your GitHub account. Nothing to install on your computer." : "Выбери приложение и подключи общий удалённый MCP со своим аккаунтом GitHub. Установка на компьютер не нужна."}</p>
           {context?<p className="mb-0 mt-3 text-copy [overflow-wrap:anywhere]">{en?"This connection is for":"Подключение для"} <strong>{context.repo}</strong><br/>{en?"Chat":"Чат"}: {context.chat_id}</p>:null}
         </div>
         <section aria-labelledby="client-heading" className="flex min-w-0 flex-col gap-3">
           {showClients?<>
           <h2 id="client-heading" className="m-0 text-section font-semibold">{en ? "Where does your AI run?" : "Где работает твой ИИ?"}</h2>
           <div className="flex flex-wrap gap-2" role="group" aria-label={en ? "AI application" : "Приложение ИИ"}>
-            {cards.map(item => <Key key={item.id} aria-pressed={item.id === card.id} onClick={() => { setSelected(item.id); setCopied(""); setProbeMessage(null); setProbeError(false); }} style={item.id === card.id ? { background: "var(--screen)", boxShadow: "inset 0 2px 4px var(--line)" } : undefined}>{item.id === "other-ai" ? en ? "Another MCP client" : "Другой MCP-клиент" : item.name}</Key>)}
+            {cards.map(item => <Key key={item.id} aria-pressed={item.id === card.id} onClick={() => { setSelected(item.id); setTransport("remote"); setSessionChoice(""); setCopied(""); setProbeMessage(null); setProbeError(false); }} style={item.id === card.id ? { background: "var(--screen)", boxShadow: "inset 0 2px 4px var(--line)" } : undefined}>{item.id === "other-ai" ? en ? "Another MCP client" : "Другой MCP-клиент" : item.name}</Key>)}
           </div>
           </>:<div className="flex flex-wrap items-center justify-between gap-3"><h2 id="client-heading" className="m-0 text-section font-semibold">{card.name}</h2><Key onClick={()=>setShowClients(true)}>{en?"Change app":"Другое приложение"}</Key></div>}
         </section>
         <Body className="flex min-w-0 flex-col gap-5 p-5 pb-7 tab:p-7 tab:pb-9">
           <div className="flex flex-col gap-2">
-            <h2 className="m-0 text-section font-semibold">{terminal ? en ? `${card.name}: one terminal command` : `${card.id === "other-ai" ? "Другой клиент" : card.name}: одна команда в терминале` : en ? `${card.name}: add an MCP server` : `${card.name}: добавь MCP-сервер`}</h2>
-            <p className="m-0 text-copy text-ink-2">{terminal ? en ? "Run this in the terminal available to your agent. It installs a real stdio MCP server and prints the GitHub authorization link." : "Выполни в терминале, доступном твоему агенту. Команда установит настоящий stdio MCP-сервер и покажет ссылку для входа через GitHub." : en ? "This web app has no terminal. Add this address in its connector settings, select OAuth and authorize GitHub access." : "В веб-приложении нет терминала. Добавь этот адрес в настройках коннекторов, выбери OAuth и разреши доступ через GitHub."}</p>
+            <h2 className="m-0 text-section font-semibold">{terminal ? en ? `${card.name}: local MCP` : `${card.name}: локальный MCP` : en ? `${card.name}: shared remote MCP` : `${card.name}: общий удалённый MCP`}</h2>
+            <p className="m-0 text-copy text-ink-2">{terminal ? en ? "Optional advanced setup. This command installs a local stdio receiver; it is not required for the remote plugin." : "Необязательный расширенный вариант. Эта команда устанавливает локальный stdio-приёмник; для удалённого плагина он не нужен." : en ? "In your app's MCP or plugin settings, add this address, choose OAuth and authorize your own GitHub account. Keep an existing CHAT.0110 connection." : "В настройках MCP или плагинов приложения добавь этот адрес, выбери OAuth и войди своим аккаунтом GitHub. Уже существующее подключение CHAT.0110 сохрани."}</p>
           </div>
           <Screen as="div" className="m-0 min-w-0 whitespace-pre-wrap px-4 py-4 text-key leading-relaxed [overflow-wrap:anywhere]"><code>{command ?? endpoint}</code></Screen>
           <div className="flex flex-wrap items-center gap-3">
             <ActionKey onClick={() => void copy("main", command ?? endpoint)}>{copied === "main" ? en ? "Copied" : "Скопировано" : terminal ? en ? "Copy command" : "Скопировать команду" : en ? "Copy MCP address" : "Скопировать адрес MCP"}</ActionKey>
-            {!terminal ? <a href={card.url} target="_blank" rel="noreferrer" className="py-2 text-key text-action-ink">{en ? "Open connector settings" : "Открыть настройки подключения"} ↗</a> : null}
+            {!terminal ? <><a href={card.url} target="_blank" rel="noreferrer" className="py-2 text-key text-action-ink">{en ? "App setup guide" : "Подключение в приложении"} ↗</a>{["codex","chatgpt"].includes(card.id)?<a href="/plugins#codex" className="py-2 text-key text-action-ink">{en?"Shared plugin package":"Пакет общего плагина"}</a>:null}</> : <Key onClick={()=>{setTransport("remote");setCopied("");}}>{en?"Use remote MCP":"Вернуться к удалённому MCP"}</Key>}
           </div>
           <p className="m-0 text-cap text-ink-2">{terminal ? en ? "Requires Node.js 22+ (includes npx). No repository clone, Bun, gh or paid API keys. Your existing sessions are not restarted." : "Нужен Node.js 22+ (с npx). Без клонирования репозитория, Bun, gh и платных API-ключей. Текущие сессии не перезапускаются." : en ? "Runs on CHAT.0110. Your AI subscription's normal limits apply. A connector does not grant permission to perform unrelated work." : "Работает на сервере CHAT.0110. Действуют обычные лимиты твоей подписки ИИ. Подключение не разрешает посторонние действия."}</p>
-          {card.id === "other-ai" ? <p className="m-0 text-cap text-ink-2">{en ? "For clients without a supported installation CLI, the command prints a ready mcpServers configuration. Paste it into your client's MCP settings." : "Для клиента без поддерживаемой команды установки появится готовый блок mcpServers. Вставь его в настройки MCP своего приложения."}</p> : null}
+          {!terminal&&["codex","chatgpt"].includes(card.id)?<p className="m-0 text-cap text-ink-2">{en?"Directory publication is pending review. The shared remote server and the downloadable candidate are available; your private connection is separate from a public listing.":"Публикация в каталоге ещё готовится к проверке. Общий удалённый сервер и пакет-кандидат доступны; личное подключение не означает публичную публикацию."}</p>:null}
         </Body>
         {copyError ? <p role="alert" className="m-0 text-copy text-action-ink">{en ? "Copy failed. Select the command above manually." : "Не удалось скопировать. Выдели команду выше вручную."}</p> : null}
         <section className="flex flex-col gap-3" aria-labelledby="delivery-heading">
           <h2 id="delivery-heading" className="m-0 text-section font-semibold">{en ? "How replies reach this chat" : "Как ответы попадут в чат"}</h2>
-          <p className="m-0 text-copy text-ink-2">{card.id === "claude-code" ? en ? "For automatic events in an open Claude Code session, authorize the chat0110-local channel. A connection probe must be acknowledged by that session. Installing MCP alone does not approve a channel." : "Для автоматических событий в открытой сессии Claude Code разреши канал chat0110-local. Сессия должна подтвердить пробное событие. Установка MCP сама по себе не даёт допуск каналу." : card.id === "chatgpt" ? en ? "In ChatGPT Work, enable CHAT.0110 and subscribe to addressed turns. An active subscription means the event route exists; only a reply proves that the AI handled a turn." : "В ChatGPT Work включи CHAT.0110 и подписку на адресованные ходы. Активная подписка означает наличие маршрута событий; обработку хода доказывает только ответ ИИ." : en ? "MCP tools work while the AI session is active. For automatic wake-up, the application must support an event channel or a verified host adapter. Installing a server cannot add that capability to the application." : "MCP-инструменты работают в активной сессии ИИ. Для автоматического пробуждения приложению нужен канал событий или проверенный host-адаптер. Установка сервера не добавляет эту возможность самому приложению."}</p>
+          <p className="m-0 text-copy text-ink-2">{card.id === "claude-code"&&terminal ? en ? "Automatic events in an open Claude Code session need an explicitly approved local channel and its probe acknowledgement." : "Для событий в открытой сессии Claude Code нужен отдельно разрешённый локальный канал с подтверждением пробного события." : card.id === "chatgpt" ? en ? "ChatGPT Work may subscribe to addressed turns when you ask it to monitor. A subscription is separate from checking an existing participant; only a reply proves delivery." : "По твоему запросу ChatGPT Work может подписаться на адресованные ходы. Подписка — отдельное действие от проверки прежнего участника; доставку доказывает только ответ." : en ? "Remote MCP works in an active session. It does not wake an idle or closed application; that needs a separately supported event channel." : "Удалённый MCP работает в активной сессии. Он не пробуждает простаивающее или закрытое приложение: для этого нужен отдельно поддерживаемый канал событий."}</p>
+          {!terminal?<p className="m-0 text-cap text-ink-2">{en?"Old tools? Refresh metadata for this private connection in its details. Publisher Rescan updates a published plugin separately. Do not reinstall, revoke OAuth or change the participant to bypass an old catalog.":"Старые инструменты? Обнови метаданные этой личной связи через Refresh в её настройках. Publisher Rescan отдельно обновляет опубликованный плагин. Не переустанавливай подключение, не отзывай OAuth и не меняй участника ради обхода старого каталога."}</p>:null}
           {terminal ? <p className="m-0 text-cap text-ink-2">{en ? "After installation, refresh the MCP tools in your existing session. Its chat0110_connect tool joins that session to a chosen chat. Other open sessions are not joined automatically." : "После установки обнови MCP-инструменты в своей существующей сессии. Инструмент chat0110_connect подключает именно её к выбранному чату. Остальные открытые сессии автоматически не подключаются."}</p> : null}
         </section>
         <section aria-labelledby="check-heading" className="flex flex-col gap-4 border-y border-line py-6">
-          {context?<><h3 className="m-0 text-section font-semibold">{en?"Send this to the session that should answer":"Отправь в ту сессию, которая должна отвечать"}</h3>
+          {context?<><h3 className="m-0 text-section font-semibold">{en?"Check the existing participant":"Проверить прежнего участника"}</h3>
+            {view&&!error?<label className="flex max-w-xl flex-col gap-2 text-cap">{en?"Participant":"Участник"}<select aria-label={en?"Participant":"Участник"} value={sessionChoice==="new"?"new":target?.id??""} onChange={e=>{setSessionChoice(e.target.value);setCopied("");setProbeMessage(null);setProbeError(false);}} className="min-h-10 min-w-0 rounded-slot border border-line bg-slot px-3 text-ink"><option value="">{en?"Choose the exact participant":"Выбери точного участника"}</option>{sessions.map(session=><option key={session.id} value={session.id}>{session.name} · @{session.alias}</option>)}<option value="new">{en?"Connect a new participant":"Подключить нового участника"}</option></select></label>:<p role="status" className="m-0 text-cap text-ink-2">{en?"Sign in and load this chat's participants before creating a request.":"Войди и дождись списка участников этого чата, прежде чем создавать запрос."}</p>}
             <p className="m-0 text-cap text-ink-2">{en?"The repository and chat identify the conversation. The session ID returned at connection identifies the recipient. Requests never go to an arbitrary session of the same model.":"Репозиторий и чат определяют разговор. Полученный при подключении session_id определяет адресата. Запрос не уходит в случайную сессию той же модели."}</p>
-            <Key className="self-start" onClick={()=>void copy("participation",sessionSetupTask(card,en,context))}>{copied==="participation"?(en?"Copied":"Скопировано"):(en?"Copy request for this session":"Скопировать запрос для этой сессии")}</Key>
-            <details className="text-cap text-ink-2"><summary className="cursor-pointer py-2">{en?"Show request":"Показать запрос"}</summary><pre className="whitespace-pre-wrap [overflow-wrap:anywhere]">{sessionSetupTask(card,en,context)}</pre></details>
+            <Key disabled={!canCopy} className="self-start" onClick={()=>void copy("participation",request)}>{copied==="participation"?(en?"Copied":"Скопировано"):(target?(en?"Copy check for the previous session":"Скопировать проверку для прежней сессии"):(en?"Copy request for this session":"Скопировать запрос для этой сессии"))}</Key>
+            {request?<details className="text-cap text-ink-2"><summary className="cursor-pointer py-2">{en?"Show request":"Показать запрос"}</summary><pre className="whitespace-pre-wrap [overflow-wrap:anywhere]">{request}</pre></details>:null}
           </>:null}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 id="check-heading" className="m-0 text-section font-semibold">{en ? "Check the connection" : "Проверить подключение"}</h2>
@@ -134,7 +143,6 @@ export function ConnectAgents({chatContext,initialClient,embedded=false}:{chatCo
             <p className="m-0 flex items-center gap-3 text-copy"><Lamp state="off" />{authorized === null ? en ? "Check OAuth authorization in your AI app" : "Проверь разрешение OAuth в своём приложении ИИ" : authorized ? en ? "Account authorized · session readiness is checked separately" : "Доступ аккаунта разрешён · готовность сессии проверяется отдельно" : en ? "This connection has not authorized the account yet" : "Аккаунт ещё не разрешил это подключение"}</p>
             {context && view ? <>
               <p className="m-0 text-copy">{!sessions.length ? en ? "This AI has not joined this chat yet" : "Этот ИИ ещё не подключил свою сессию к чату" : target ? `${target.name} · @${target.alias}` : en ? "Select the exact session" : "Выбери точную сессию"}</p>
-              {sessions.length > 1 ? <label className="flex max-w-xl flex-col gap-2 text-cap">{en ? "AI session" : "Сессия ИИ"}<select value={target?.id ?? ""} onChange={e => { setSessionChoice(e.target.value); setProbeMessage(null); setProbeError(false); }} className="min-h-10 min-w-0 rounded-slot border border-line bg-slot px-3 text-ink"><option value="">{en ? "Choose a session" : "Выбери сессию"}</option>{sessions.map(session => <option key={session.id} value={session.id}>{session.name} · @{session.alias}</option>)}</select></label> : null}
               {card.id === "chatgpt" ? <p className="m-0 text-cap text-ink-2">{connections.chatgpt.last_error ? en ? "Event delivery failed. Reconnect the ChatGPT subscription." : "Ошибка доставки событий. Восстанови подписку ChatGPT." : connections.chatgpt.connected ? en ? "Event subscription active · a reply has not been verified by this check" : "Подписка на события активна · ответ этой проверкой ещё не подтверждён" : en ? "No active ChatGPT event subscription" : "Нет активной подписки ChatGPT на события"}</p> : null}
               {!view.chains.length ? <p className="m-0 text-cap text-ink-2">{en ? "No addressed turns have been created in this chat yet. A plain @ without a recipient does not trigger an AI." : "В этом чате пока не создано адресованных ходов. Один символ @ без адресата не вызывает ИИ."}</p> : null}
               <div className="flex flex-wrap items-center gap-3"><Key disabled={!target?.auto_enabled || probing} onClick={() => void probe()}>{probing ? en ? "Sending…" : "Отправляем…" : en ? "Send a test to this chat" : "Отправить тест в этот чат"}</Key><span className="text-cap text-ink-2">{en ? "Publishes one short request to the selected AI." : "Опубликует один короткий запрос выбранному ИИ."}</span></div>
@@ -146,9 +154,8 @@ export function ConnectAgents({chatContext,initialClient,embedded=false}:{chatCo
         </section>
         <details className="text-cap text-ink-2"><summary className="cursor-pointer py-2">{en ? "MCP address, package and technical details" : "Адрес MCP, пакет и технические сведения"}</summary><div className="mt-3 flex flex-col items-start gap-3">
           <code className="[overflow-wrap:anywhere]">{endpoint}</code><Key onClick={() => void copy("endpoint", endpoint)}>{copied === "endpoint" ? en ? "Copied" : "Скопировано" : en ? "Copy address" : "Скопировать адрес"}</Key>
-          <a href={mcpPackageUrl} className="py-1 text-action-ink">Node stdio MCP · {MCP_PACKAGE_VERSION} · .tgz</a>
           <a href="/plugins" className="py-1 text-action-ink">{en ? "Plugin packages" : "Пакеты плагинов"}</a>
-          <p className="m-0">{en ? "The CLI registers chat0110-local without removing other servers. OAuth credentials stay in a private local file. CHAT.0110 remains on the server; no incoming port is exposed on your computer." : "CLI регистрирует chat0110-local, не удаляя другие серверы. OAuth хранится в приватном локальном файле. CHAT.0110 остаётся на сервере; входящий порт компьютера наружу не открывается."}</p>
+          {terminalClient(card)?<details><summary className="cursor-pointer py-2">{en?"Advanced: local stdio receiver":"Расширенный вариант: локальный stdio-приёмник"}</summary><div className="mt-3 flex flex-col items-start gap-3"><p className="m-0">{en?"Only if you explicitly need a local client channel. This is a separate connection, not a repair of the existing remote participant.":"Только если тебе явно нужен локальный канал клиента. Это отдельный способ подключения, а не восстановление прежнего remote-участника."}</p><Key onClick={()=>{setTransport("local");setCopied("");}}>{en?"Choose local setup":"Выбрать локальное подключение"}</Key><a href={mcpPackageUrl} className="py-1 text-action-ink">Node stdio MCP · {MCP_PACKAGE_VERSION} · .tgz</a></div></details>:null}
         </div></details>
         <div role="status" aria-live="polite" className="sr-only-text">{copied ? en ? "Copied to clipboard" : "Скопировано в буфер обмена" : ""}</div>
       </div>

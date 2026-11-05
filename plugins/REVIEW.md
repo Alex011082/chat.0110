@@ -1,6 +1,6 @@
 # Досье для проверки CHAT.0110
 
-Версия пакетов 0.4.2, протокол MCP/API 2.1.0. Статус обоих — not-submitted.
+Версия пакетов 0.4.3, протокол MCP/API 2.1.0. Статус обоих — not-submitted.
 Исходники: apps/cli/src/connector.ts, connector-state.ts и packages/chat-protocol;
 сборка: bun run package:plugins. ZIP и SHA-256: apps/web/public/downloads.
 Для упаковки нужны Bun 1.3.14 и Python 3 (только стандартная библиотека zipfile).
@@ -11,7 +11,7 @@ Vite. После публичного выпуска любое изменени
 
 | Пакет | Доступ | Автодоставка | Допуск |
 |---|---|---|---|
-| Codex | OAuth remote MCP, scope chat:agent | Отдельный живой host, не свойство remote MCP | Нет hooks; review owner/portal отдельно |
+| ChatGPT / Codex | Общий OAuth remote MCP, scope chat:agent | Возможности реального host; remote сам не будит idle | Нет local/hooks; review owner/portal отдельно |
 | Claude Code | Локальный MCP, существующий gh login, только CHAT.0110 | Только разрешённый channel + probe ack | Клиентский allowlist/официальная проверка отдельно |
 
 Плагин не запускает новые модели/сессии, не сканирует рабочие файлы целиком, не
@@ -26,15 +26,23 @@ Vite. После публичного выпуска любое изменени
 
 ## Перед подачей владельцем
 
-- Выбрать/подтвердить лицензию своего кода, publisher и соответствие требованиям портала.
+- Подтвердить publisher и соответствие требованиям портала. License optional,
+  её отсутствие не обязательный блокер подачи по текущей документации.
 - Утвердить реальные публичные privacy/terms/support URL и контакт поддержки.
 - Предоставить reviewer test account с минимальными правами и инструкцией отзыва доступа.
-- Развернуть совместимый MCP 2.1.0 после отдельного разрешения на production.
+- Совместимый remote MCP 2.1.0 уже выпущен с PR #28. Этот PR готовит frontend/ZIP
+  0.4.3 в CI; backend/OAuth не меняет и новый выкат не разрешает.
 - Проверить clean install, включение/выключение, client restart/revoke и настоящий
   channel/host на целевых приложениях. Validation не доказывает runtime.
 - Codex hooks не включать в публичный review ZIP. Local MCP submission у OpenAI
   partner-gated; не выдавать локальный Claude bundle за допустимую OpenAI remote-подачу.
 - Отдельно пройти channel approval Anthropic; упаковка сама не добавляет allowlist.
+
+Для remote-пакета подготовлены пять positive и три negative review cases, release
+notes и RU listing. Это ещё не пройденные reviewer-кейсы. Owner предоставил Alex
+Davidov / alexdavidov127@gmail.com; identity verification не подтверждена.
+Privacy/terms/reviewer account/video/domain verification остаются конкретными
+шагами. Полное досье: docs/publication/submission-readiness.md в репозитории.
 
 Reviewers могут собрать архивы из source, сравнить SHA-256, проверить manifests и
 прогнать stdio fixtures без модели. В пакетах отсутствуют test credentials,

@@ -31,7 +31,7 @@ test("прежний remote участник проверяется status бе�
  const existing={id:"73873dad-e998-4f36-bb29-5eb54702d35b",alias:"codex",name:"Existing",author:"codex"};
  expect(sessionSetupAction(card,context,{existing})).toEqual({mode:"resume",request:{name:"chat0110_status",arguments:{session_id:"73873dad-e998-4f36-bb29-5eb54702d35b"}},expected:{repo:"owner/product",chat:"20261103-abcd",author:"codex",alias:"codex",id:"73873dad-e998-4f36-bb29-5eb54702d35b"}});
  expect(sessionSetupAction(card,context).mode).toBe("choose");
- expect(sessionSetupAction(card,context,{newParticipant:true}).request.name).toBe("chat0110_connect");
+ expect(sessionSetupAction(card,context,{newParticipant:true}).request?.name).toBe("chat0110_connect");
  expect(()=>sessionSetupAction(card,context,{existing:{...existing,author:"chatgpt"}})).toThrow();
  expect(()=>sessionSetupAction(card,context,{existing:{...existing,id:""}})).toThrow();
  expect(sessionSetupAction(card,context,{existing,transport:"local"}).mode).toBe("blocked");

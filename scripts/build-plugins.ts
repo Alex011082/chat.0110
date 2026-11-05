@@ -6,6 +6,10 @@ import {createHash} from "node:crypto";
 import {MCP_PACKAGE_VERSION} from "../packages/chat-protocol/src/mcp-install.ts";
 const root=resolveRoot(),version=MCP_PACKAGE_VERSION,downloads=join(root,"apps/web/public/downloads");
 function resolveRoot(){return dirname(dirname(import.meta.path));}
+// Скрытый compatibility manifest тоже уезжает в ZIP: его нельзя оставить на старой версии.
+for(const file of ["plugins/codex/plugin.json","plugins/codex/.codex-plugin/plugin.json","plugins/codex/review-status.json","plugins/claude-code/.claude-plugin/plugin.json","plugins/claude-code/review-status.json"]){
+ if(JSON.parse(readFileSync(join(root,file),"utf8")).version!==version)throw Error(`Версия ${file} не совпадает с пакетом ${version}`);
+}
 mkdirSync(downloads,{recursive:true});mkdirSync(join(root,"plugins/claude-code/server"),{recursive:true});
 const built=await Bun.build({entrypoints:[join(root,"apps/cli/src/connector.ts")],target:"bun",minify:true,outdir:join(root,"plugins/claude-code/server"),naming:"connector.js"});
 if(!built.success)throw Error("Plugin MCP build failed");
@@ -37,7 +41,7 @@ if(!notices.length){
  for(const dependency of Object.keys(pkg.dependencies??{}).sort())collect(dependency,sdk);
 }
 const index=[];
-for(const [folder,id,name,file] of [["codex","codex","Codex","chat0110-codex"],["claude-code","claude","Claude Code","chat0110-claude-code"]]){
+for(const [folder,id,name,file] of [["codex","codex","ChatGPT / Codex","chat0110-codex"],["claude-code","claude","Claude Code","chat0110-claude-code"]]){
  const source=join(root,"plugins",folder!);
  await Bun.write(join(source,"REVIEW.md"),readFileSync(join(root,"plugins/REVIEW.md")));
  if(folder==="claude-code")await Bun.write(join(source,"THIRD_PARTY_NOTICES.txt"),notices.join("\n\n"));
@@ -49,5 +53,8 @@ for(const [folder,id,name,file] of [["codex","codex","Codex","chat0110-codex"],[
  index.push({id,name,version,url:`/downloads/${filename}`,sha256,bytes:bytes.length,status:"not-submitted",official:false});
 }
 await Bun.write(join(downloads,"plugins.json"),JSON.stringify({version,plugins:index},null,2)+"\n");
+const checked=spawnSync("python3",[join(root,"scripts/check-remote-plugin.py"),downloads],{encoding:"utf8"});
+if(checked.status!==0)throw Error("Проверка remote ZIP не прошла: "+checked.stderr);
+console.log(checked.stdout.trim());
 console.log(JSON.stringify({plugins:index.map(p=>({name:p.name,bytes:p.bytes,sha256:p.sha256}))}));
 await import("./build-mcp-package.ts");

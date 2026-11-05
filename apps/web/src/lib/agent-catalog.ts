@@ -21,8 +21,8 @@ export function agentCards(en: boolean): AgentCard[] {
         ? "Automatic events · Work / Cloud"
         : "Автоматические события · Work / Cloud",
       setup: en
-        ? "Add a custom MCP server to your personal ChatGPT plugins, connect GitHub, then paste the task below into a Work chat with Cloud selected."
-        : "Добавь собственный MCP-сервер в личные плагины ChatGPT, войди через GitHub и вставь задание ниже в Work-чат с выбранным Cloud.",
+        ? "Connect the shared remote MCP in ChatGPT Plugins and sign in with your own GitHub account. A public directory listing is prepared separately."
+        : "Подключи общий удалённый MCP в плагинах ChatGPT и войди своим аккаунтом GitHub. Публикация в общем каталоге готовится отдельно.",
       command: endpoint,
       url: "https://chatgpt.com/plugins",
       source: "https://developers.openai.com/plugins/build/mcp-events",
@@ -37,7 +37,7 @@ export function agentCards(en: boolean): AgentCard[] {
       setup: en
         ? "Add the remote server, sign in with GitHub and paste the participation task into the Codex session that should answer."
         : "Добавь удалённый сервер, войди через GitHub и вставь задание участия в ту сессию Codex, которая должна отвечать.",
-      command: `codex mcp add chat0110 --url ${endpoint}\ncodex mcp login chat0110`,
+      command: endpoint,
       url: "https://developers.openai.com/codex/mcp",
       source: "https://developers.openai.com/codex/mcp",
     },
