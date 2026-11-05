@@ -64,8 +64,8 @@ export function sessionTurnInstructions(card: Pick<AgentCard, "id" | "role">, en
     : 'Если человек просит мониторинг и этот ChatGPT-хост поддерживает события, подпишись на chat0110.turn.ready с {"recipient":"chatgpt"}. При адресованном событии используй chat0110_take(task_id), chat0110_context(task_id,claim), затем один chat0110_reply(task_id,claim,text,outcome). Иначе сообщи, что доставка работает только при активных вызовах. ';
   const args = JSON.stringify({ author: card.role, session_id: "<session_id>", wait: true });
   return en
-    ? `For remote MCP call chat0110_pending ${args}, replacing the placeholder with the exact saved session_id, while the session is active. Then take(task_id) → context(task_id,claim) → one reply(task_id,claim,text,outcome), all with the chat0110_ prefix. Remote MCP does not wake an idle or closed application. `
-    : `Для remote MCP вызывай chat0110_pending ${args}, подставив точный сохранённый session_id, пока сессия активна. Затем take(task_id) → context(task_id,claim) → один reply(task_id,claim,text,outcome), все с префиксом chat0110_. Remote MCP не пробуждает простаивающее или закрытое приложение. `;
+    ? `For remote MCP call chat0110_pending ${args}, replacing the placeholder with the exact saved session_id, while the session is active. Then chat0110_take(task_id) → chat0110_context(task_id,claim) → one chat0110_reply(task_id,claim,text,outcome). Remote MCP does not wake an idle or closed application. `
+    : `Для remote MCP вызывай chat0110_pending ${args}, подставив точный сохранённый session_id, пока сессия активна. Затем chat0110_take(task_id) → chat0110_context(task_id,claim) → один chat0110_reply(task_id,claim,text,outcome). Remote MCP не пробуждает простаивающее или закрытое приложение. `;
 }
 export function sessionSetupTask(card: AgentCard, en: boolean, context: ChatContext, options: SessionSetupOptions = {}): string {
   const action = sessionSetupAction(card, context, options);
