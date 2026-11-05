@@ -4,6 +4,44 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStatic } from "../src/static.ts";
 
+test("подтверждение домена — точный plaintext, отсутствующий challenge не подменяется SPA", async () => {
+ const root=await mkdtemp(join(tmpdir(),"chat0110-domain-"));
+ try {
+  await Bun.write(join(root,"index.html"),"SPA");
+  const serve=createStatic(root),url="https://chat.0110.digital/.well-known/openai-apps-challenge";
+  expect((await serve(new Request(url))).status).toBe(404);
+  const token="synthetic-domain-verification-fixture";
+  await Bun.write(join(root,".well-known/openai-apps-challenge"),token);
+  const response=await serve(new Request(url));
+  expect(response.status).toBe(200);expect(await response.text()).toBe(token);
+  expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(await (await serve(new Request(url,{method:"HEAD"}))).text()).toBe("");
+  for(const path of ["/.well-known/unknown","/.well-known/openai-apps-challenge/extra","/.well-known/%2e%2e%2findex.html"])
+   expect((await serve(new Request("https://chat.0110.digital"+path))).status).toBe(404);
+ } finally {await rm(root,{recursive:true,force:true});}
+});
+
+test("правовые страницы доступны без SPA и скриптов; отсутствующие страницы дают 404", async () => {
+ const root=await mkdtemp(join(tmpdir(),"chat0110-legal-"));
+ try {
+  await Bun.write(join(root,"index.html"),"SPA");const serve=createStatic(root);
+  for(const name of ["privacy","terms"]){
+   const url=`https://chat.0110.digital/${name}`;
+   expect((await serve(new Request(url))).status).toBe(404);
+   const html=`<!doctype html><title>${name}</title><main>Public policy</main>`;
+   await Bun.write(join(root,`${name}.html`),html);
+   const response=await serve(new Request(url));
+   expect(response.status).toBe(200);expect(await response.text()).toBe(html);
+   expect(response.headers.get("content-type")).toContain("text/html");
+   expect(response.headers.get("cache-control")).toBe("no-cache");
+   expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+   expect(await (await serve(new Request(url,{method:"HEAD"}))).text()).toBe("");
+  }
+ } finally {await rm(root,{recursive:true,force:true});}
+});
+
 test("ZIP плагина раздаётся файлом с MIME и checksum; неверный путь не становится SPA",async()=>{
  const root=await mkdtemp(join(tmpdir(),"chat0110-downloads-"));
  try{
