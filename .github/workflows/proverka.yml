@@ -22,6 +22,8 @@ jobs:
       - run: bun test
       - run: bun run typecheck
       - run: bun run build
+      - name: Проверка раздаваемого remote-плагина
+        run: python3 scripts/check-remote-plugin.py apps/web/dist/downloads candidate-artifacts/remote-plugin
       - name: Скрипты выката
         run: for f in deploy/*.sh; do bash -n "$f"; done
       - name: Совместимый артефакт отката и проверка очереди
@@ -39,5 +41,11 @@ jobs:
         with:
           name: chat0110-rollback-${{ github.event.pull_request.head.sha || github.sha }}
           path: artifacts/
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chat0110-remote-plugin-${{ github.event.pull_request.head.sha || github.sha }}
+          path: candidate-artifacts/remote-plugin/
           retention-days: 7
           if-no-files-found: error
