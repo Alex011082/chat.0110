@@ -39,6 +39,21 @@ export function createStatic(distDir: string) {
       return new Response("Метод не поддерживается", { status: 405, headers: { Allow: "GET, HEAD" } });
     }
     const pathname = new URL(req.url).pathname;
+    // Эти адреса проверяет внешний портал. SPA с кодом 200 здесь ложно
+    // подтверждала бы наличие документа или challenge.
+    if (pathname.startsWith("/.well-known/")) {
+      if (pathname !== "/.well-known/openai-apps-challenge") return new Response("Не найдено", {status:404});
+      const file=await fileIfExists(inside(".well-known/openai-apps-challenge"));
+      const token=file?(await file.text()).trim():"";
+      if (!/^[A-Za-z0-9_-]{20,256}$/.test(token)) return new Response("Не найдено", {status:404});
+      return new Response(req.method==="HEAD"?null:token, {headers:{"Content-Type":"text/plain; charset=utf-8","Cache-Control":"no-store","X-Content-Type-Options":"nosniff"}});
+    }
+    if (["/privacy","/privacy.html","/terms","/terms.html"].includes(pathname)) {
+      const name=pathname.startsWith("/privacy")?"privacy.html":"terms.html";
+      const file=await fileIfExists(inside(name));
+      if (!file) return new Response("Не найдено", {status:404});
+      return new Response(req.method==="HEAD"?null:file, {headers:htmlHeaders({"Cache-Control":"no-cache"})});
+    }
     if(pathname.startsWith("/downloads/")){
       if(!/^\/downloads\/(?:(?:plugins|mcp)\.json|chat0110-(?:codex|claude-code)-[0-9]+\.[0-9]+\.[0-9]+\.zip(?:\.sha256)?|chat0110-mcp-[0-9]+\.[0-9]+\.[0-9]+\.tgz(?:\.sha256)?)$/.test(pathname))return new Response("Не найдено",{status:404});
       const file=await fileIfExists(inside(pathname.slice(1)));if(!file)return new Response("Не найдено",{status:404});
