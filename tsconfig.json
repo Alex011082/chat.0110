@@ -37,6 +37,10 @@
     "apps/cli/test/mcp-*.test.ts",
     "apps/cli/test/plugin-channel.test.ts",
     "scripts/build-plugins.ts",
-    "scripts/build-mcp-package.ts"
+    "scripts/build-mcp-package.ts",
+    "scripts/build-rollback-artifact.ts",
+    "scripts/check-rollback-artifact.ts",
+    "deploy/check-channel-guard.ts",
+    "apps/cli/test/rollback-policy.test.ts"
   ]
 }

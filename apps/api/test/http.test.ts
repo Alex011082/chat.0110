@@ -514,7 +514,7 @@ test("адресное сообщение проходит Claude → Codex → 
   const agent=async(method:string,body:unknown)=>{
     const response=await app(new Request(`${PUBLIC}/api/agent/${method}`,{method:"POST",headers:{authorization:"Bearer ghu_fixture-user-token","content-type":"application/json"},body:JSON.stringify(body)}));
     const result=await response.json();
-    expect(response.status).toBe(200);
+    expect(response.status,JSON.stringify(result)).toBe(200);
     return result;
   };
   const a=await agent("register",{repo:"Alex011082/chat.0110",chat_id:chat,session_id:"claude-instance",alias:"claude-work",name:"Claude",author:"claude",model:"sonnet"});

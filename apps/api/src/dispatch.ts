@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { randomUUID, createHash } from "node:crypto";
 import type { AgentSession, DispatchChain, DispatchView } from "@chat0110/chat-protocol";
 import { badRequest, forbidden, HttpError, notFound } from "./errors.ts";
+import {ChannelReplacements} from "./channel-replacement.ts";
 
 export interface SessionRow {
   id: string;
@@ -48,6 +49,8 @@ interface ChainRow {
 export class DispatchStore {
   private db: Database;
   private waiters = new Map<string, number>();
+  private replacements:ChannelReplacements;
+  private publishing=new Set<string>();
   constructor(path: string | Database) {
     this.db = typeof path === "string" ? new Database(path, { create: true }) : path;
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
@@ -66,6 +69,13 @@ export class DispatchStore {
     if (!this.db.query<{ name: string }, []>("PRAGMA table_info(tasks)").all().some(column => column.name === "outcome"))
       this.db.exec("ALTER TABLE tasks ADD COLUMN outcome TEXT");
     this.db.exec("CREATE TABLE IF NOT EXISTS auto_requests (uid INTEGER NOT NULL,repo TEXT NOT NULL,chat TEXT NOT NULL,author TEXT NOT NULL,enabled INTEGER NOT NULL,PRIMARY KEY(uid,repo,chat,author))");
+    this.replacements=new ChannelReplacements(this.db);
+  }
+  assertChannel(uid:number,id:string,key?:unknown){this.replacements.assert(uid,id,key);}
+  issueChannelReplacement(uid:number,id:string,code:unknown){return this.replacements.issue(uid,id,code);}
+  replaceChannel(uid:number,repo:string,chat:string,alias:string,author:string,external:string,key:unknown,code:unknown){
+    const result=this.replacements.replace(uid,repo,chat,alias,canonicalMention(author),external,key,code);
+    if(result.changed)this.waiters.delete(result.session.id);return result.session;
   }
   preparePublication(requestId: string, uid: number, repo: string, chat: string, author: string, text: string, replyTo: unknown, legacyId?: string): { id: string; author: string } {
     if (!isAuthor(author)) throw badRequest("Логин не подходит как автор сообщения");
@@ -120,6 +130,7 @@ export class DispatchStore {
     name: string,
     author = alias,
     model = "",
+    channelKey?:unknown,
   ): SessionRow {
     repo = repo.toLowerCase();
     alias = alias.toLowerCase();
@@ -142,6 +153,7 @@ export class DispatchStore {
       >("SELECT * FROM sessions WHERE uid=? AND repo=? AND chat=? AND external=?")
       .get(uid, repo, chat, external);
     if (old) {
+      this.assertChannel(uid,old.id,channelKey);
       this.touch(old.id);
       return this.session(old.id, uid);
     }
@@ -179,9 +191,11 @@ export class DispatchStore {
     this.db.query("UPDATE sessions SET seen=? WHERE id=?").run(Date.now(), id);
   }
   waiting(id: string, uid: number, author?: string): () => void {
+    let generation:number;
     try {
       const session = this.session(id, uid);
       if (author && session.author !== author) return () => {};
+      generation=session.auto_generation;
     } catch { return () => {}; }
     this.touch(id);
     this.waiters.set(id, (this.waiters.get(id) ?? 0) + 1);
@@ -189,12 +203,14 @@ export class DispatchStore {
     return () => {
       if (closed) return;
       closed = true;
+      if(this.session(id,uid).auto_generation!==generation)return;
       const count = (this.waiters.get(id) ?? 1) - 1;
       if (count) this.waiters.set(id, count); else this.waiters.delete(id);
     };
   }
   setAutoEnabled(uid: number, sessionId: string, enabled: boolean) {
     const session=this.session(sessionId, uid);
+    if(!!session.auto_enabled!==enabled)this.waiters.delete(sessionId);
     this.db.transaction(() => {
       this.db.query("INSERT INTO auto_requests VALUES (?,?,?,?,?) ON CONFLICT(uid,repo,chat,author) DO UPDATE SET enabled=excluded.enabled").run(uid,session.repo,session.chat,session.author,enabled?1:0);
       this.db.query("UPDATE sessions SET auto_generation=auto_generation+CASE WHEN auto_enabled!=? THEN 1 ELSE 0 END,auto_enabled=? WHERE id=?").run(enabled ? 1 : 0, enabled ? 1 : 0, sessionId);
@@ -355,11 +371,23 @@ export class DispatchStore {
     this.db.query("UPDATE tasks SET text=?,outcome=? WHERE id=?").run(text, outcome, id);
     return t;
   }
+  beginPublication(uid:number,session:string,key:unknown,id:string,claim:string,text:string,outcome="continue"):()=>void {
+    if(this.publishing.has(id))throw new HttpError(409,"conflict","Этот ответ уже публикуется; дождитесь квитанции");
+    this.db.transaction(()=>{
+      this.assertChannel(uid,session,key);
+      this.prepareAnswer(id,session,claim,text,outcome);
+      this.db.query("INSERT OR IGNORE INTO channel_publications VALUES (?,?)").run(id,session);
+    }).immediate();
+    this.publishing.add(id);
+    // После ошибки остаётся SQLite-квитанция неопределённой публикации. Только finish снимает её.
+    return ()=>{this.publishing.delete(id);};
+  }
   finish(id: string, claim: string, answerId: string) {
     this.db.transaction(() => {
       this.expire();
       const t = this.db.query<Task, [string]>("SELECT * FROM tasks WHERE id=?").get(id);
       if (!t || t.claim !== claim) throw forbidden("Неверный исполнитель хода");
+      this.db.query("DELETE FROM channel_publications WHERE task_id=?").run(id);
       if (t.status === "done") return;
       const c = this.db.query<ChainRow, [string]>("SELECT * FROM chains WHERE id=?").get(t.chain_id)!;
       // Поздний опубликованный ответ сохраняется, но не оживляет остановленную цепочку.

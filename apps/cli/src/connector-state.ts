@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID,randomBytes } from "node:crypto";
 export interface PendingTurn {
   task: { id: string; claim: string };
   answer?: string;
@@ -13,6 +13,7 @@ export interface SavedConnection {
   session: string | null;
   current: PendingTurn | null;
   pull_id?: string;
+  channel_key?:string;
 }
 /** Claim — локальный секрет: сохраняем приватно и не допускаем два процесса одной сессии. */
 export class ConnectorState {
@@ -54,6 +55,7 @@ export class ConnectorState {
       )
         throw new Error("Invalid connector state; do not replace an unknown active turn.");
       this.value = value;
+      if(this.value.channel_key!==undefined&&!/^[a-f0-9]{64}$/.test(this.value.channel_key))throw new Error("Invalid private channel key.");
       if (this.value.current) this.value.current.resumed = true;
     } catch (error: any) {
       if (error.code !== "ENOENT") {
@@ -62,6 +64,7 @@ export class ConnectorState {
       }
       this.value = { external: randomUUID(), session: null, current: null };
     }
+    this.value.channel_key??=randomBytes(32).toString("hex");
     this.save();
   }
   private acquire() {

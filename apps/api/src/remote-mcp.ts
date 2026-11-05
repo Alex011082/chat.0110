@@ -213,7 +213,9 @@ export function createRemoteMcp(o: Options) {
     if(name==="chat0110_status"||name==="chat0110_set_auto_reply"){
       if(typeof args.session_id!=="string"||!args.session_id.trim())throw badRequest("Нужен session_id из connect");
       const session=dispatch.session(args.session_id,uid),repo=repoRef(session.repo);
+      dispatch.assertChannel(uid,session.id);
       await requireOpenChat(gh,repo,session.chat);
+      dispatch.assertChannel(uid,session.id);
       if(name==="chat0110_set_auto_reply"){
         if(typeof args.enabled!=="boolean")throw badRequest("Нужен enabled boolean");
         dispatch.setAutoEnabled(uid,session.id,args.enabled);if(args.enabled)void pump();
@@ -226,12 +228,17 @@ export function createRemoteMcp(o: Options) {
       if (typeof args.session_id !== "string" || !args.session_id.trim())
         throw badRequest("Передай session_id из chat0110_connect; если параметра нет, обнови каталог инструментов MCP");
       const author = canonicalMention(String(args.author ?? "chatgpt"));
+      try{dispatch.assertChannel(uid,args.session_id);}catch(e){
+        // Чужой/неизвестный id не раскрывает существование сессии; перенесённый свой канал получает отказ.
+        if(e instanceof HttpError&&e.status===404)return {turns:[]};throw e;
+      }
       const until = Date.now() + (args.wait === true ? 25_000 : 0);
       let ready;
       const stopWaiting = args.wait === true ? dispatch.waiting(args.session_id, uid, author) : () => {};
       signal.addEventListener("abort", stopWaiting, { once: true });
       try {
         do {
+          dispatch.assertChannel(uid,args.session_id);
           ready = dispatch.remoteReady(uid, author, args.session_id);
           if (ready.length || Date.now() >= until || signal.aborted) break;
           await Bun.sleep(500);
@@ -248,6 +255,7 @@ export function createRemoteMcp(o: Options) {
     if (!info.can_push) throw forbidden("Нет права записи");
     const pull = await gh.findChatPull(repo, task.chat);
     if (!pull || pull.state !== "open") throw new HttpError(409, "conflict", "Чат закрыт");
+    dispatch.assertChannel(uid,task.session_id);
     if (name === "chat0110_take") {
       if (task.status === "done") return { done: true, task_id: id };
       const claimed = task.claim ? task : dispatch.claim(task.session_id, id);
@@ -255,7 +263,7 @@ export function createRemoteMcp(o: Options) {
       dispatch.touch(task.session_id);
       dispatch.heartbeat(id, task.session_id, claimed.claim!);
       const chain=dispatch.chain(task.chain_id,uid)!;
-      return {
+      const payload={
         task_id: id,
         step: task.step,
         final: task.step === JSON.parse(chain.route).length - 1,
@@ -267,17 +275,21 @@ export function createRemoteMcp(o: Options) {
         repo: task.repo,
         chat_id: task.chat,
       };
+      dispatch.assertChannel(uid,task.session_id);return payload;
     }
     dispatch.task(id, task.session_id, String(args.claim), name === "chat0110_reply");
     if (name === "chat0110_context") {
       dispatch.heartbeat(id, task.session_id, String(args.claim));
-      return { prompt: (await privacy.scan(task.prompt)).text, reply_to: task.reply_to, timeline: await getTimeline(gh, repo, task.chat, privacy) };
+      const prompt=(await privacy.scan(task.prompt)).text;dispatch.assertChannel(uid,task.session_id);
+      const timeline=await getTimeline(gh,repo,task.chat,privacy);dispatch.assertChannel(uid,task.session_id);
+      return {prompt,reply_to:task.reply_to,timeline};
     }
     if (name === "chat0110_reply") {
       if (typeof args.text !== "string" || !args.text.trim() || args.text.length > 60_000)
         throw badRequest("Нужен ответ до 60000 знаков");
       args.text = (await privacy.scan(args.text.replace(/\r\n?/g, "\n").trim())).text;
-      dispatch.prepareAnswer(id, task.session_id, String(args.claim), args.text as string, args.outcome === undefined ? "continue" : String(args.outcome));
+      const release=dispatch.beginPublication(uid,task.session_id,undefined,id,String(args.claim),args.text as string,args.outcome===undefined?"continue":String(args.outcome));
+      try{
       const item = await postMessage(
         { gh, user: { login: p.session.login, id: uid }, privacy },
         repo,
@@ -289,6 +301,7 @@ export function createRemoteMcp(o: Options) {
       hub.publish(task.repo, "chat.updated", { repo: task.repo, chat_id: task.chat, number: null });
       void pump();
       return { item };
+      }finally{release();}
     }
     throw notFound("Неизвестный инструмент");
   }

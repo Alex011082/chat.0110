@@ -6,7 +6,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomUUID,createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { McpCredentials } from "./mcp-auth.ts";
 
@@ -21,6 +21,7 @@ let state: ConnectorState | null = null;
 let token = "";
 const credentials = process.env.CHAT0110_AUTH_FILE ? new McpCredentials(process.env.CHAT0110_AUTH_FILE, base.origin) : null;
 let session: string | null = null;
+let channelId:string|undefined;
 let current: PendingTurn | null = null;
 function save() {
   if (state) {
@@ -41,7 +42,7 @@ async function call(method: string, body: Record<string, unknown>): Promise<any>
   const send = () => fetch(new URL(`/api/agent/${method}`, base), {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(credentials ? { "X-Chat0110-Auth": "oauth" } : {}) },
-    body: JSON.stringify({ ...body, session_id: session ?? state?.value.external }),
+    body: JSON.stringify({ ...body, session_id: session ?? state?.value.external,channel_key:state?.value.channel_key }),
     signal: AbortSignal.any([shutdown.signal,AbortSignal.timeout(40_000)]),
     redirect: "error",
   });
@@ -81,7 +82,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: "chat0110_connect",
       description: "Connect this authorized agent session to a specific CHAT.0110 conversation. No model API calls.",
       inputSchema: object(
-        { repo: string, chat_id: string, alias: string, name: string, author: string, model: string },
+        { repo: string, chat_id: string, alias: string, name: string, author: string, model: string,replacement_code:{type:"string",description:"One-time permission prepared by this chat's owner to replace the existing channel. Never guess or publish it."},channel_id:{type:"string",description:"Public channel identifier returned after replacement. Save it and supply it on reconnect to recover only this channel's private state."} },
         ["repo", "chat_id", "alias", "name", "author"],
       ),
     },
@@ -126,10 +127,15 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (request.params.name === "chat0110_connect") {
       if (session) throw new Error("This process is already connected. Use another MCP session for another chat.");
       if(process.env.CHAT0110_AUTHOR&&args.author!==process.env.CHAT0110_AUTHOR)throw Error("This plugin is bound to its declared author.");
+      const permit=args.replacement_code;
+      if(permit!==undefined&&(typeof permit!=="string"||!/^[a-f0-9]{64}$/.test(permit)))throw Error("Invalid replacement permission.");
+      if(args.channel_id!==undefined&&(typeof args.channel_id!=="string"||!/^[a-f0-9]{64}$/.test(args.channel_id)))throw Error("Invalid channel_id.");
+      channelId=typeof permit==="string"?createHash("sha256").update(`chat0110/channel/${permit}`).digest("hex"):args.channel_id as string|undefined;
+      if(permit!==undefined&&args.channel_id!==undefined&&args.channel_id!==channelId)throw Error("channel_id does not match this replacement permission.");
       state?.close();
       state = new ConnectorState(
         process.env.CHAT0110_STATE_DIR ?? join(homedir(), ".local", "state", "chat0110"),
-        `${base.origin}/${String(args.repo).toLowerCase()}/${args.chat_id}/${String(args.alias).toLowerCase()}`,
+        `${base.origin}/${String(args.repo).toLowerCase()}/${args.chat_id}/${String(args.alias).toLowerCase()}${channelId?`/channel/${channelId}`:""}`,
       );
       const registered = await call("register", args);
       // Старый API не гарантирует новые границы очереди и управление из чата.
@@ -154,6 +160,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
         session_id: session,
         delivery: channel ? "waiting_for_channel_ack" : "active_calls_only",
         auto_enabled:!!registered.auto_enabled,
+        ...(channelId?{channel_id:channelId,reconnect:"Save channel_id and pass it to chat0110_connect after restarting this MCP. Do not use another participant's identity."}:{}),
       };
     } else {
       if (!session) throw new Error("Connect this session first with chat0110_connect.");

@@ -326,6 +326,13 @@ export async function createApp(deps: AppDeps): Promise<App> {
           if (body.enabled && deps.background) void remote.pump();
           return json(200, remote.view(session.uid, info.full_name, chatId));
         }
+        if(rest.length===1&&rest[0]==="channel-replacement"&&method==="POST"){
+          const body=await readJson(req),info=await gh.getRepo(repo),pull=await gh.findChatPull(repo,chatId);
+          if(!info.can_push||!pull||pull.state!=="open"||pull.author.toLowerCase()!==session.login.toLowerCase())throw forbidden("Заменить канал может только владелец открытого чата");
+          const agent=dispatch.session(String(body.session_id),session.uid);
+          if(agent.repo!==info.full_name.toLowerCase()||agent.chat!==chatId)throw notFound("Сессия не найдена");
+          return json(201,dispatch.issueChannelReplacement(session.uid,agent.id,body.code));
+        }
         if (rest.length === 1 && rest[0] === "dispatch" && method === "POST") {
           const info = await gh.getRepo(repo);
           if (!info.can_push) throw forbidden("Нет права записи");
@@ -473,6 +480,11 @@ export async function createApp(deps: AppDeps): Promise<App> {
       const repo = repoFromParam(body.repo);
       if (typeof body.chat_id !== "string" || !isChatId(body.chat_id)) throw badRequest("Неверный чат");
       const info = await requireOpenChat(gh, repo, body.chat_id);
+      if(body.replacement_code!==undefined){
+        const replaced=dispatch.replaceChannel(user.id,info.full_name,body.chat_id,String(body.alias??""),String(body.author??""),String(body.session_id??""),body.channel_key,body.replacement_code);
+        hub.publish(replaced.repo,"chat.updated",{repo:replaced.repo,chat_id:replaced.chat,number:null});
+        return json(200,{version:"2.1.0",capabilities:{idempotent_next:true,channel_replacement:true},...replaced});
+      }
       return json(
         200,
         {version:"2.1.0",capabilities:{idempotent_next:true},...dispatch.register(
@@ -484,16 +496,21 @@ export async function createApp(deps: AppDeps): Promise<App> {
           String(body.name ?? ""),
           String(body.author ?? ""),
           String(body.model ?? ""),
+          body.channel_key,
         )},
       );
     }
     const session = dispatch.session(String(body.session_id), user.id);
+    const assertChannel=()=>dispatch.assertChannel(user.id,session.id,body.channel_key);
+    assertChannel();
     const repo = repoFromParam(session.repo);
     const info = await gh.getRepo(repo);
     if (!info.can_push) throw forbidden("Нет права записи");
+    assertChannel();
     dispatch.touch(session.id);
     if(path==="/api/agent/status"||path==="/api/agent/auto-replies"){
       await requireOpenChat(gh,repo,session.chat);
+      assertChannel();
       if(path.endsWith("auto-replies")){
         if(typeof body.enabled!=="boolean")throw badRequest("Нужен enabled boolean");
         dispatch.setAutoEnabled(user.id,session.id,body.enabled);
@@ -510,6 +527,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
       req.signal.addEventListener("abort", stopWaiting, { once: true });
       try {
         do {
+          assertChannel();
           task = typeof body.request_id==="string" ? dispatch.claimRequest(session.id,body.request_id) : dispatch.claim(session.id);
           if (task || Date.now() >= until || req.signal.aborted) break;
           await Bun.sleep(500);
@@ -517,7 +535,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
       } finally { stopWaiting(); req.signal.removeEventListener("abort", stopWaiting); }
       if (!task) return json(200, { task: null });
       const chain = dispatch.chain(task.chain_id, user.id)!;
-      return json(200, {
+      const payload={
         task: await privacy.object(task),
         prompt: (await privacy.scan(chain.prompt)).text,
         repo: session.repo,
@@ -525,22 +543,27 @@ export async function createApp(deps: AppDeps): Promise<App> {
         url: `${config.publicUrl}/${session.repo}/${session.chat}`,
         final: task.step === JSON.parse(chain.route).length - 1,
         expires_at: chain.expires_at,
-      });
+      };
+      assertChannel();return json(200,payload);
     }
     const task = dispatch.task(String(body.task_id), session.id, String(body.claim), path === "/api/agent/complete");
     if (path === "/api/agent/heartbeat") {
       dispatch.heartbeat(task.id, session.id, String(body.claim));
       return json(200, { ok: true });
     }
-    if (path === "/api/agent/context") return json(200, await getTimeline(gh, repo, session.chat, privacy));
+    if (path === "/api/agent/context") {
+      const timeline=await getTimeline(gh,repo,session.chat,privacy);assertChannel();return json(200,timeline);
+    }
     if (path === "/api/agent/complete") {
       if (typeof body.text !== "string" || !body.text.trim() || body.text.length > 60_000)
         throw badRequest("Нужен ответ до 60000 знаков");
       // Одинаковый id и сохранённый текст делают повтор после обрыва безопасным.
       body.text = (await privacy.scan(body.text.replace(/\r\n?/g, "\n").trim())).text;
-      dispatch.prepareAnswer(task.id, session.id, String(body.claim), body.text as string, body.outcome === undefined ? "continue" : String(body.outcome));
+      assertChannel();
       const pull = await gh.findChatPull(repo, session.chat);
       if (!pull || pull.state !== "open") throw new HttpError(409, "conflict", "Чат закрыт");
+      const release=dispatch.beginPublication(user.id,session.id,body.channel_key,task.id,String(body.claim),body.text as string,body.outcome===undefined?"continue":String(body.outcome));
+      try{
       const item = await postMessage(
         ctx,
         repo,
@@ -551,6 +574,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
       dispatch.finish(task.id, String(body.claim), item.id);
       hub.publish(session.repo, "chat.updated", { repo: session.repo, chat_id: session.chat, number: null });
       return json(200, { item });
+      }finally{release();}
     }
     throw notFound("Неизвестный метод коннектора");
   }

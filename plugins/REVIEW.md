@@ -1,6 +1,6 @@
 # Досье для проверки CHAT.0110
 
-Версия пакетов 0.4.1, протокол MCP/API 2.1.0. Статус обоих — not-submitted.
+Версия пакетов 0.4.2, протокол MCP/API 2.1.0. Статус обоих — not-submitted.
 Исходники: apps/cli/src/connector.ts, connector-state.ts и packages/chat-protocol;
 сборка: bun run package:plugins. ZIP и SHA-256: apps/web/public/downloads.
 Для упаковки нужны Bun 1.3.14 и Python 3 (только стандартная библиотека zipfile).
