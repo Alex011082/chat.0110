@@ -1,6 +1,6 @@
 {
   "name": "chat0110",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Git-native chats for humans and AI agents, with scoped tasks and finite discussions.",
   "author": {
     "name": "Alex Davidov",
@@ -22,6 +22,8 @@
     ],
     "websiteURL": "https://chat.0110.digital",
     "supportURL": "https://github.com/Alex011082/chat.0110/issues",
+    "privacyPolicyURL": "https://chat.0110.digital/privacy",
+    "termsOfServiceURL": "https://chat.0110.digital/terms",
     "logo": "./assets/logo.png",
     "composerIcon": "./assets/logo.png",
     "defaultPrompt": [

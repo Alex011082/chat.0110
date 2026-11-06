@@ -1,6 +1,6 @@
 # Досье для проверки CHAT.0110
 
-Версия пакетов 0.4.3, протокол MCP/API 2.1.0. Статус обоих — not-submitted.
+Версия пакетов 0.4.4, протокол MCP/API 2.1.0. Статус обоих — not-submitted.
 Исходники: apps/cli/src/connector.ts, connector-state.ts и packages/chat-protocol;
 сборка: bun run package:plugins. ZIP и SHA-256: apps/web/public/downloads.
 Для упаковки нужны Bun 1.3.14 и Python 3 (только стандартная библиотека zipfile).
@@ -30,8 +30,8 @@ Vite. После публичного выпуска любое изменени
   её отсутствие не обязательный блокер подачи по текущей документации.
 - Утвердить реальные публичные privacy/terms/support URL и контакт поддержки.
 - Предоставить reviewer test account с минимальными правами и инструкцией отзыва доступа.
-- Совместимый remote MCP 2.1.0 уже выпущен с PR #28. Этот PR готовит frontend/ZIP
-  0.4.3 в CI; backend/OAuth не меняет и новый выкат не разрешает.
+- Совместимый remote MCP 2.1.0 выпущен с PR #28. ZIP 0.4.4 добавляет адреса
+  утверждённых издателем privacy/terms, не меняя OAuth, очереди и инструменты.
 - Проверить clean install, включение/выключение, client restart/revoke и настоящий
   channel/host на целевых приложениях. Validation не доказывает runtime.
 - Codex hooks не включать в публичный review ZIP. Local MCP submission у OpenAI
@@ -40,9 +40,11 @@ Vite. После публичного выпуска любое изменени
 
 Для remote-пакета подготовлены пять positive и три negative review cases, release
 notes и RU listing. Это ещё не пройденные reviewer-кейсы. Owner предоставил Alex
-Davidov / alexdavidov127@gmail.com; identity verification не подтверждена.
-Privacy/terms/reviewer account/video/domain verification остаются конкретными
-шагами. Полное досье: docs/publication/submission-readiness.md в репозитории.
+Davidov / alexdavidov127@gmail.com; Individual identity в портале Approved.
+Тексты privacy/terms утверждены владельцем. Создан draft с ZIP 0.4.3;
+новый ZIP 0.4.4 ещё требует загрузки в него. Reviewer account, видео,
+реальная клиентская приёмка и domain verification остаются отдельными шагами.
+Полное досье: docs/publication/submission-readiness.md в репозитории.
 
 Reviewers могут собрать архивы из source, сравнить SHA-256, проверить manifests и
 прогнать stdio fixtures без модели. В пакетах отсутствуют test credentials,
