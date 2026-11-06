@@ -34,11 +34,10 @@ with zipfile.ZipFile(archive) as z:
         assert 0 < len(interface["displayName"]) <= 30
         assert 0 < len(interface["shortDescription"]) <= 30
         assert 0 < len(interface["longDescription"]) <= 4000
-        for key in ["websiteURL", "supportURL"]:
+        for key in ["websiteURL", "supportURL", "privacyPolicyURL", "termsOfServiceURL"]:
             assert interface[key].startswith("https://") and "example.com" not in interface[key]
-        for key in ["privacyPolicyURL", "termsOfServiceURL"]:
-            if key in interface:
-                assert interface[key].startswith("https://") and "example.com" not in interface[key]
+        assert interface["privacyPolicyURL"] == "https://chat.0110.digital/privacy"
+        assert interface["termsOfServiceURL"] == "https://chat.0110.digital/terms"
         for key in ["logo", "composerIcon"]:
             asset = z.read(interface[key].removeprefix("./"))
             assert asset.startswith(b"\x89PNG\r\n\x1a\n")
