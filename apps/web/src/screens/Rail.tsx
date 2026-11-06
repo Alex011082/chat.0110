@@ -2,6 +2,8 @@ import { LanguageSwitch } from "../ui/LanguageSwitch.tsx";
 import { s } from "../strings.ts";
 import { cx, Knob, Mark, TextButton } from "../ui/kit.tsx";
 import { setDesign, useDesign } from "../lib/design.ts";
+import {GlobalSettings} from "./GlobalSettings.tsx";
+import {PlusIcon,TreeIcon,ChatsIcon} from "../ui/icons.tsx";
 
 interface RailProps {
   /** Какой раздел открыт: ручка текущего — чёрная. */
@@ -13,10 +15,11 @@ interface RailProps {
   canCreate: boolean;
   /** На телефоне рельс лежит внизу горизонтально. */
   bottom?: boolean;
+  login?:string;
 }
 
 /** Алюминиевый рельс с ручками разделов. */
-export function Rail({ view, onChats, onTree, onNew, onLogout, canCreate, bottom }: RailProps) {
+export function Rail({ view, onChats, onTree, onNew, onLogout, canCreate, bottom,login="" }: RailProps) {
   // Переключатель дизайна: на рельсе «прибора» и в светлом на телефоне (там рельс внизу).
   const light = useDesign() === "light";
   const designSwitch = (
@@ -33,19 +36,11 @@ export function Rail({ view, onChats, onTree, onNew, onLogout, canCreate, bottom
   );
   if (bottom) {
     return (
-      <nav
-        aria-label={s.rail.label}
-        className="flex shrink-0 flex-col gap-3 border-t border-line bg-rail px-3 pt-3 pb-[max(14px,env(safe-area-inset-bottom))]"
-      >
-        <div className="flex w-full justify-around gap-2">{knobs}</div>
-        <div className="flex w-full items-center justify-between gap-2">
-        <LanguageSwitch />
-        <a href="/plugins" className="text-cap text-ink-2">{s.locale === "en" ? "AI plugins" : "Плагины ИИ"}</a>
-        {designSwitch}
-        <TextButton onClick={onLogout} className="mt-[9px] min-h-10 px-2.5">
-          {s.rail.logout}
-        </TextButton>
-        </div>
+      <nav aria-label={s.rail.label} className="mobile-list-toolbar">
+       <h1>{view==="tree"?s.rail.tree:s.list.heading}</h1>
+       <button type="button" className="settings-trigger" aria-label={view==="tree"?s.rail.chats:s.rail.tree} onClick={view==="tree"?onChats:onTree}>{view==="tree"?<ChatsIcon/>:<TreeIcon/>}</button>
+       <button type="button" className="settings-trigger" aria-label={s.newChat.title} disabled={!canCreate} onClick={onNew}><PlusIcon/></button>
+       <GlobalSettings login={login} onLogout={onLogout}/>
       </nav>
     );
   }

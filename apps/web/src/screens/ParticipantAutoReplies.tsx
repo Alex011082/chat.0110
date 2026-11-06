@@ -63,7 +63,7 @@ export function ParticipantAutoReplies({
           <p className="m-0 text-cap text-ink-2">
             {en
               ? requested?"Waiting for the plugin · start requested":"Install the plugin once to receive new turns."
-              : requested?"Включение запрошено · сессия к этому чату ещё не подключена":"Участник есть в истории. Подключи сессию к этому чату."}
+              : "Нужно подключить"}
           </p>
           {compact?<div className="control-row"><span>{en?"Automatic replies":"Автоответы"}</span><Toggle label={en?"Automatic replies":"Автоответы"} checked={requested} disabled={!!busy} onChange={async()=>{if(busy)return;setBusy("author");setError(false);try{onChange(await setAuthorAutoReply(`${repo}/${chatId}`,author,!requested));}catch{setError(true);}finally{setBusy("");}}}/></div>:<Key disabled={!!busy} onClick={async()=>{if(busy)return;setBusy("author");setError(false);try{onChange(await setAuthorAutoReply(`${repo}/${chatId}`,author,!requested));}catch{setError(true);}finally{setBusy("");}}} className="self-start text-cap">
             {busy?(en?"Saving…":"Сохраняем…"):requested?(en?"Turn off automatic replies":"Выключить автоответы"):(en?"Turn on automatic replies":"Включить автоответы")}
@@ -80,7 +80,7 @@ export function ParticipantAutoReplies({
                 </span>
               ):null}
               <span role="status" className="text-cap text-ink-2">
-                {compact&&!session.auto_enabled?(en?"New turns are paused":"Новые задания приостановлены"):agentConnectionLabel(session,view,en)}
+                {agentConnectionLabel(session,view,en)}
               </span>
               <span className="text-cap text-ink-2 [overflow-wrap:anywhere]">{en?"Address":"Обращение"}: @{session.alias}</span>
               {compact?<div className="control-row"><span>{en?"Automatic replies":"Автоответы"}</span><Toggle label={`${en?"Automatic replies":"Автоответы"}: ${agentSessionName(session)}`} checked={!!session.auto_enabled} disabled={!!busy} onChange={()=>void toggle(session)}/></div>:<Key
@@ -100,7 +100,10 @@ export function ParticipantAutoReplies({
                       ? "Turn on automatic replies"
                       : "Включить автоответы"}
               </Key>}
-              <ChannelReplacement key={`${repo}/${chatId}/${session.id}`} session={session} repo={repo} chatId={chatId}/>
+              <details><summary className="participant-detail-toggle">{en?"Connection details":"Подключение и подробности"}</summary>
+               <p className="text-cap text-ink-2">{session.auto_enabled?(en?"Automatic replies are enabled. Delivery depends on a connected client for this chat.":"Автоответы включены. Доставка зависит от подключённого клиента этого чата."):(en?"New tasks are paused; existing history is preserved.":"Новые задания приостановлены; история сохранена.")}</p>
+               <ChannelReplacement key={`${repo}/${chatId}/${session.id}`} session={session} repo={repo} chatId={chatId}/>
+              </details>
             </div>
           );
         })

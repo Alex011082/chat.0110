@@ -1,7 +1,6 @@
 import {ParticipantsBar} from "./ParticipantsBar.tsx";
-import { LanguageSwitch } from "../ui/LanguageSwitch.tsx";
 import type { MessageItem, TimelineResponse } from "@chat0110/chat-protocol";
-import { useMemo, type ReactNode } from "react";
+import { useEffect,useMemo,useState, type ReactNode } from "react";
 import { ApiFailure, errorText } from "../api.ts";
 import { lastForkable } from "../lib/fork.ts";
 import { chatRoute } from "../lib/route.ts";
@@ -72,9 +71,12 @@ export function ChatView(p: ChatViewProps) {
   const forkFrom = useMemo(() => lastForkable(items), [items]);
   const status = syncStatus(p.sync, p.now);
   const chatKey = `${chat.repo.toLowerCase()}/${chat.chat_id}`;
+  const [mobilePanel,setMobilePanel]=useState<"privacy"|"tasks"|null>(null);
+  useEffect(()=>setMobilePanel(null),[chatKey]);
 
   const timeline = (
     <Timeline
+      compact={p.phone}
       hasMore={p.data.history?.has_more}
       checking={p.data.history?.checking}
       checkFailed={p.data.history?.check_failed}
@@ -110,11 +112,19 @@ export function ChatView(p: ChatViewProps) {
       phone={p.phone}
       focusTick={p.focusTick}
       light={p.light && !p.phone}
+      panel={mobilePanel}
+      onClosePanel={()=>setMobilePanel(null)}
     />
   );
 
   // Светлая шапка: кружки участников, «+» — позвать агента или человека, «⋯» — редкое.
   const more: MenuItem[] = [
+    ...(p.phone?[
+      {kind:"button" as const,label:s.locale==="en"?"Data protection":"Защита данных",onClick:()=>setMobilePanel("privacy")},
+      {kind:"button" as const,label:s.locale==="en"?"Tasks in this chat":"Задания в этом чате",onClick:()=>setMobilePanel("tasks")},
+      {kind:"button" as const,label:s.locale==="en"?"Branches and decisions":"Ветвления и решения",onClick:p.onInfo},
+      {kind:"link" as const,label:s.locale==="en"?"Connect AI":"Подключить ИИ",href:`/connect?repo=${encodeURIComponent(chat.repo)}&chat=${encodeURIComponent(chat.chat_id)}`,external:true},
+    ]:[]),
     {
       kind: "button",
       label: s.header.fork,
@@ -124,10 +134,11 @@ export function ChatView(p: ChatViewProps) {
     },
     ...(p.onPropose ? [{ kind: "button" as const, label: s.header.propose, title: s.header.proposeHint, onClick: p.onPropose }] : []),
     { kind: "link", label: s.header.openInGitHub, href: chat.url, external: true },
+    ...(p.phone&&p.settings?[{kind:"node" as const,node:p.settings}]:[]),
   ];
   const title = (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <h1 className={cx("m-0 truncate leading-snug font-semibold tracking-[-0.01em]", p.phone ? "text-[18px]" : "text-[23px]")}>{chat.title}</h1>
+      <h1 title={chat.title} className={cx("m-0 leading-snug font-semibold tracking-[-0.01em]", p.phone ? "mobile-chat-title" : "truncate text-[23px]")}>{chat.title}</h1>
       <span className="flex min-w-0 items-center gap-1.5 text-cap text-ink-2" aria-live="polite">
         <Lamp state={status.lamp} size={8} ring={false} />
         <span className="truncate">{status.lamp === "act" ? status.text : s.header.phoneStatus(chat.number, p.phone ? (status.online ? s.header.phoneOnline : s.header.phoneOffline) : status.text)}</span>
@@ -140,49 +151,22 @@ export function ChatView(p: ChatViewProps) {
     <Menu label={s.design.more} trigger={<DotsIcon />} items={more} />
   </>;
   const lightHeader = (
-    <header className={cx("light-chat-header", p.phone && "flex-wrap")}>
+    <header className={cx("light-chat-header", p.phone && "mobile-chat-header")}>
       {p.phone ? <>
         <div className="flex w-full items-center gap-2">
           <button type="button" aria-label={s.header.back} onClick={p.onBack} className="settings-trigger shrink-0"><ChevronIcon left size={22}/></button>
-          {title}{p.settings}
+          {title}<Menu phone label={s.locale==="en"?"Chat actions":"Действия чата"} trigger={<DotsIcon/>} items={more}/>
         </div>
-        <div className="flex w-full items-center justify-end gap-2">{controls}</div>
+        <div className="flex w-full items-center gap-2"><ParticipantsBar chat={chat} limit={3} store={p.data.chat_store} phone onToast={p.onToast}/></div>
       </> : <>{title}{controls}</>}
     </header>
   );
 
-  if (p.phone && p.light) {
-    return (
-      <div className="flex h-dvh flex-col bg-body">
-        {lightHeader}
-        {timeline}
-        {composer}
-      </div>
-    );
-  }
-
   if (p.phone) {
     return (
-      <div className="flex h-dvh flex-col bg-ground">
-        <div className="flex min-h-0 flex-1 flex-col gap-3.5 px-3.5 pt-3.5 pb-3.5">
-          <Body as="header" className="flex flex-wrap items-center gap-2.5 px-3 pt-3 pb-[18px] plinth-7">
-            <RoundKey glyph="‹" aria-label={s.header.back} onClick={p.onBack} />
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <h1 className="m-0 truncate text-section font-semibold tracking-[-0.01em]">{chat.title}</h1>
-              <span className="flex items-center gap-[7px] text-cap text-ink-2">
-                <Lamp state={status.lamp} size={8} />
-                <span className="truncate">
-                  {status.lamp === "act"
-                    ? status.text
-                    : s.header.phoneStatus(chat.number, status.online ? s.header.phoneOnline : s.header.phoneOffline)}
-                </span>
-              </span>
-            </div>
-            <LanguageSwitch />
-            <RoundKey aria-label={s.header.infoKnob} aria-expanded={p.infoOpen} onClick={p.onInfo} />
-          </Body>
-          {timeline}
-        </div>
+      <div className="mobile-chat flex h-dvh flex-col bg-body">
+        {lightHeader}
+        {timeline}
         {composer}
       </div>
     );

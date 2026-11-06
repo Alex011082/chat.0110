@@ -5,7 +5,8 @@ import { agoShort, isFresh } from "../lib/time.ts";
 import { s } from "../strings.ts";
 import { routeHref } from "../hooks.ts";
 import { chatRoute } from "../lib/route.ts";
-import { cx, Key, KeyLink, Lamp, Mark, Plate, SLOT } from "../ui/kit.tsx";
+import { cx, Key, KeyLink, Lamp, Plate, SLOT } from "../ui/kit.tsx";
+import {RepoPicker} from "./RepoPicker.tsx";
 
 interface ChatListProps {
   repos: RepoInfo[] | null;
@@ -47,7 +48,7 @@ export function ChatList(p: ChatListProps) {
 
   return (
     <Wrap phone={p.phone} light={p.light}>
-      <label className="flex flex-col gap-1.5">
+      {p.phone?<RepoPicker repos={p.repos} value={p.repo} onChange={p.onRepo}/>:<label className="flex flex-col gap-1.5">
         <span className={p.light ? "sr-only-text" : "text-cap font-semibold"}>{s.list.repo}</span>
         <select
           className={cx(SLOT, "text-key")}
@@ -62,9 +63,9 @@ export function ChatList(p: ChatListProps) {
             </option>
           ))}
         </select>
-      </label>
+      </label>}
 
-      {p.light ? null : (
+      {p.light||p.phone ? null : (
         <Key onClick={p.onNew} disabled={!p.canCreate} className="w-full">
           {s.newChat.title}
         </Key>
@@ -78,7 +79,7 @@ export function ChatList(p: ChatListProps) {
         migration={p.migration}
         migrating={p.migrating}
         onMigrate={p.onMigrate}
-        light={p.light}
+        light={p.light||p.phone}
       />
 
       <label className="flex flex-col gap-1.5">
@@ -181,13 +182,7 @@ function Wrap({ phone, light, children }: { phone?: boolean | undefined; light?:
         phone ? "px-4 pt-5 pb-6" : "h-full px-[22px] py-[30px]",
       )}
     >
-      {phone ? (
-        <div className="flex items-end gap-2.5 pb-1">
-          <Mark cell={3} />
-          <span className="text-scale tracking-[0.03em] text-ink-2">{s.markSub}</span>
-        </div>
-      ) : null}
-      <h2 className="m-0 mb-1 text-section font-semibold tracking-[-0.01em]">{s.list.heading}</h2>
+      {!phone?<h2 className="m-0 mb-1 text-section font-semibold tracking-[-0.01em]">{s.list.heading}</h2>:null}
       {children}
     </aside>
   );

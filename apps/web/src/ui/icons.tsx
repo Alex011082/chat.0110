@@ -116,3 +116,4 @@ export function CheckIcon(p: IconProps) {
     </Svg>
   );
 }
+export function SendIcon(p:IconProps){return <Svg {...p}><path d="M12 19V5m-6 6 6-6 6 6"/></Svg>;}

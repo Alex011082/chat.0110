@@ -54,7 +54,7 @@ export function ActionKeyLink({ className, children, ...rest }: AnchorHTMLAttrib
 }
 
 /** Круглая клавиша отправки на телефоне. */
-export function ActionRound({ className, type = "button", ...rest }: ButtonHTMLAttributes<HTMLButtonElement>) {
+export function ActionRound({ className, type = "button", children, ...rest }: ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       type={type}
@@ -65,7 +65,7 @@ export function ActionRound({ className, type = "button", ...rest }: ButtonHTMLA
       )}
       {...rest}
     >
-      <span aria-hidden="true" className="size-[9px] rounded-full bg-white" />
+      {children??<span aria-hidden="true" className="size-[9px] rounded-full bg-white" />}
     </button>
   );
 }

@@ -504,7 +504,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
     main = (
       <ChatView
         onLoadHistory={async()=>{if(chatKey)fullHistory.current.add(chatKey);await loadTimeline();}}
-        settings={<GlobalSettings login={me.login} onLogout={onLogout}/>}
+        settings={<GlobalSettings login={me.login} onLogout={onLogout} triggerLabel={phone?(s.locale==="en"?"App settings":"Настройки приложения"):undefined}/>}
         data={current.data}
         sync={current}
         local={local}
@@ -611,6 +611,7 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       onNew={startChat}
       onLogout={onLogout}
       canCreate={canCreate}
+      login={me.login}
       bottom={bottom}
     />
   );
@@ -668,8 +669,8 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
       <>
         {phone ? (
           <div className="flex h-dvh flex-col bg-ground">
-            <main className="min-h-0 flex-1">{tree}</main>
             {rail(true)}
+            <main className="min-h-0 flex-1">{tree}</main>
           </div>
         ) : light ? (
           <div className="grid h-dvh grid-cols-[272px_minmax(0,1fr)] bg-ground text-ink">
@@ -695,8 +696,8 @@ export function Shell({ me, config, onLogout }: { me: Me; config: AppConfig | nu
     if (!route.chatId) {
       screen = (
         <div className="flex h-dvh flex-col bg-ground">
-          <div className="min-h-0 flex-1 overflow-y-auto">{list}</div>
           {rail(true)}
+          <div className="min-h-0 flex-1 overflow-y-auto">{list}</div>
         </div>
       );
     } else if (infoOpen && info) {

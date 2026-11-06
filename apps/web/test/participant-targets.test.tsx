@@ -16,7 +16,7 @@ test("переключатель показывает сохранённое в�
  const session={id:"one",author:"claude",alias:"claude-site",name:"Сайт",model:"sonnet",online:true,auto_enabled:true,delivery_ready:false};
  const html=renderToStaticMarkup(<ParticipantAutoReplies author="claude" sessions={[session]} view={{sessions:[session],chains:[]}} repo="a/b" chatId="20261103-abcd" canPush compact onChange={()=>{}}/>);
  expect(html).toContain('role="switch" aria-checked="true"');
- expect(html).toContain("приёмник этого чата не подключён");
+ expect(html).toContain("Нужно подключить");
  expect(html).not.toContain("Выключить автоответы");
  expect(html).toContain("Настроить подключение");
 });

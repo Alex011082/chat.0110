@@ -13,8 +13,8 @@ test("исторический участник получает настоящ�
 });
 test("готовность приёмника важнее недавней активности и относится к конкретному чату",()=>{
  const view={sessions:[],chains:[]},session={id:"one",author:"claude",name:"Claude Code",alias:"claude-one",auto_enabled:true,online:true,delivery_ready:false} as any;
- expect(agentConnectionLabel(session,view,false)).toContain("приёмник этого чата не подключён");
- expect(agentConnectionLabel({...session,online:false,delivery_ready:true},view,false)).toBe("Подключён к этому чату");
+ expect(agentConnectionLabel(session,view,false)).toBe("Нужно подключить");
+ expect(agentConnectionLabel({...session,online:false,delivery_ready:true},view,false)).toBe("Получает обращения");
 });
 test("мастер показывает общий удалённый адрес без команды локальной установки",()=>{
  setLocale("ru");

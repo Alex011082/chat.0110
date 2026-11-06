@@ -11,7 +11,7 @@ export function PrivacyNotice({ text }: { text: string }) {
 
 // compact — строка подсказок под полем на компьютере: свёрнутая занимает одну
 // строку, раскрытая уходит на всю ширину блока ввода.
-export function PrivacyPanel({ chatKey, text, onApply, compact = false }: { chatKey: string; text: string; onApply: (value: string) => void; compact?: boolean }) {
+export function PrivacyPanel({ chatKey, text, onApply, compact = false, expanded=false }: { chatKey: string; text: string; onApply: (value: string) => void; compact?: boolean; expanded?:boolean }) {
   const [result, setResult] = useState<{ version: number; value: PrivacyResult } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -30,7 +30,7 @@ export function PrivacyPanel({ chatKey, text, onApply, compact = false }: { chat
   };
   const shown = result?.version === current.current.version ? result.value : null;
   return (
-    <details className={compact ? "min-w-0 max-w-full text-cap text-ink-2 open:basis-full" : "border-t border-line pt-2 text-cap text-ink-2"}>
+    <details open={expanded||undefined} className={compact ? "min-w-0 max-w-full text-cap text-ink-2 open:basis-full" : "border-t border-line pt-2 text-cap text-ink-2"}>
       <summary className={compact ? "cursor-pointer" : "min-h-9 cursor-pointer py-2"}>{en ? "Data protection · on" : "Защита данных · включена"}</summary>
       <div className="flex max-h-[min(24svh,200px)] flex-col gap-3 overflow-y-auto overscroll-contain py-2 pr-1">
         <p className="m-0">{en ? "Secrets, emails, phones, documents, bank details, names and addresses are replaced before publication and delivery to AI. Originals are not saved." : "Ключи, пароли, email, телефоны, документы, реквизиты, имена и адреса заменяются до публикации и передачи ИИ. Оригиналы не сохраняются."}</p>
