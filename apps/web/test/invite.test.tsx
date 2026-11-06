@@ -74,11 +74,12 @@ test("телефон в светлом: отдельные участники и
   expect(h).not.toContain("lang-switch");
 });
 
-test("«прибор» без «+» — ни на компьютере, ни на телефоне", async () => {
+test("«прибор» сохраняет старую шапку на компьютере; телефон получает общие кружки и приглашение", async () => {
   setLocale("ru");
   for (const phone of [false, true]) {
     const html = view(await demo(), { light: false, phone });
-    expect(html).not.toContain('aria-label="Пригласить в чат"');
+    if(phone)expect(html).toContain('aria-label="Пригласить в чат"');
+    else expect(html).not.toContain('aria-label="Пригласить в чат"');
   }
 });
 

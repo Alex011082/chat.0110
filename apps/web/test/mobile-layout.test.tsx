@@ -5,6 +5,7 @@ import {agentConnectionLabel} from "../src/lib/auto-replies.ts";
 import {watchViewport} from "../src/lib/viewport.ts";
 import {findRepositories} from "../src/lib/repositories.ts";
 import {setLocale} from "../src/strings.ts";
+import {TaskHistory} from "../src/screens/TaskHistory.tsx";
 
 test("клавиатура Safari: scroll видимой области меняет положение кадра, закрытие возвращает высоту",()=>{
  const host=Object.assign(new EventTarget(),{innerHeight:844,visualViewport:Object.assign(new EventTarget(),{height:510,offsetTop:86,scale:1})});
@@ -39,4 +40,19 @@ test("поиск репозиториев учитывает владельца 
  expect(findRepositories(repos,"web",["foreign/private","Team/API"]).all.map(r=>r.full_name)).toEqual(["Owner/Website"]);
  expect(findRepositories(repos,"",["foreign/private","Team/API","Team/API"]).recent.map(r=>r.full_name)).toEqual(["Team/API"]);
  expect(findRepositories(repos,"TEAM",[]).all.map(r=>r.full_name)).toEqual(["Team/API"]);
+});
+
+test("на телефоне можно остановить каждую активную цепочку, а не только последнюю",()=>{
+ setLocale("ru");
+ const session={id:"a",alias:"codex",author:"codex",model:"",name:"Codex",online:true};
+ const view={sessions:[session],chains:[
+  {id:"new",message_id:"m2",route:["a"],step:0,status:"waiting" as const},
+  {id:"old",message_id:"m1",route:["a"],step:0,status:"running" as const},
+  {id:"ended",message_id:"m0",route:["a"],step:0,status:"expired" as const},
+ ]};
+ const html=renderToStaticMarkup(<TaskHistory view={view} canStop onStop={()=>{}}/>);
+ expect(html.match(/>Остановить<\/button>/g)?.length).toBe(2);
+ expect(html).toContain('data-chain="new"');expect(html).toContain('data-chain="old"');
+ const readOnly=renderToStaticMarkup(<TaskHistory view={view} canStop={false} onStop={()=>{}}/>);
+ expect(readOnly).not.toContain(">Остановить</button>");
 });
