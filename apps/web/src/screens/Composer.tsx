@@ -112,7 +112,7 @@ export function Composer(p: ComposerProps) {
               <span>
                 {agentSessionName(session)} · @{session.alias}
               </span>
-              <span>{agentConnectionLabel(session,dispatch!,s.locale === "en")}</span>
+              <span>{dispatchError?d.unavailable:agentConnectionLabel(session,dispatch!,s.locale === "en")}</span>
             </button>
           ))}
         </div>
