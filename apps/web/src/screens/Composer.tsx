@@ -12,6 +12,7 @@ import {drafts} from "../lib/drafts.ts";
 import {useOnline} from "../lib/pwa.ts";
 import {Sheet} from "../ui/Sheet.tsx";
 import {CloseIcon,SendIcon} from "../ui/icons.tsx";
+import {TaskHistory} from "./TaskHistory.tsx";
 
 // Черновики живут, пока открыта вкладка: переход в другой чат их не теряет.
 
@@ -144,6 +145,7 @@ export function Composer(p: ComposerProps) {
       {dispatch && !dispatch.sessions.length && (!p.phone||route.length>0) ? <span>{d.empty}</span> : null}
       {(dispatch?.chains ?? [])
         .filter((c) => !["done", "cancelled",...(p.phone?["expired"]:[])].includes(c.status))
+        .sort((a,b)=>p.phone?Number(b.status==="running")-Number(a.status==="running"):0)
         .slice(0, p.phone?1:5)
         .map((chain) => (
           <div key={chain.id} className="flex items-center justify-between gap-2">
@@ -279,7 +281,7 @@ export function Composer(p: ComposerProps) {
       </form>
       <Sheet open={!!p.panel} phone onClose={()=>p.onClosePanel?.()} labelledBy={panelId} dismissOnBackdrop>
        <section className="phone-sheet-surface"><header className="phone-sheet-heading"><h2 id={panelId}>{p.panel==="privacy"?(s.locale==="en"?"Data protection":"Защита данных"):(s.locale==="en"?"Tasks in this chat":"Задания в этом чате")}</h2><button type="button" className="settings-trigger" aria-label={s.locale==="en"?"Close":"Закрыть"} onClick={()=>p.onClosePanel?.()}><CloseIcon/></button></header>
-       {p.panel==="privacy"?<PrivacyPanel chatKey={p.chatKey} text={text} onApply={update} expanded/>:<div className="flex flex-col gap-3">{!dispatch?<p role="status">{d.unavailable}</p>:dispatch.chains.length?dispatch.chains.map(chain=><div key={chain.id} className="task-history-row"><span>{chain.route.map(id=>dispatch.sessions.find(session=>session.id===id)?.name??"?").join(" → ")}</span><span className="text-cap text-ink-2">{d.status[chain.status]}</span></div>):<p>{s.locale==="en"?"No tasks yet":"Пока нет заданий"}</p>}</div>}
+       {p.panel==="privacy"?<PrivacyPanel chatKey={p.chatKey} text={text} onApply={update} expanded/>:!dispatch?<p role="status">{d.unavailable}</p>:<TaskHistory view={dispatch} canStop={p.canPush&&!sending} onStop={id=>dispatchRequest(p.chatKey,id).then(setDispatch)}/>}
        </section>
       </Sheet>
       </>

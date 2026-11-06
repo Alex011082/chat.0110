@@ -632,7 +632,7 @@ html,body,#root{height:100%;overflow:hidden;overscroll-behavior:none}
 .mobile-composer [role="option"]{min-height:44px;align-items:flex-start;text-align:left}
 .mobile-send{color:#fff;box-shadow:none}
 .phone-sheet[open]{position:fixed;inset:auto;top:var(--app-top,0px);left:0;margin:0;width:100%;height:var(--app-height,100dvh);max-height:var(--app-height,100dvh);display:flex;align-items:flex-end;overflow:hidden}
-.phone-sheet-surface{box-sizing:border-box;display:flex;flex-direction:column;gap:16px;width:100%;max-height:calc(100% - 16px);overflow-y:auto;overscroll-behavior:contain;padding:16px 20px max(18px,var(--app-bottom-inset,env(safe-area-inset-bottom)));border-radius:20px 20px 0 0;background:var(--body);box-shadow:0 -10px 40px -18px rgba(0,0,0,.35)}
+.phone-sheet-surface{box-sizing:border-box;display:flex;flex-direction:column;gap:16px;width:100%;max-height:calc(100% - max(16px,env(safe-area-inset-top)));overflow-y:auto;overscroll-behavior:contain;padding:16px 20px max(18px,var(--app-bottom-inset,env(safe-area-inset-bottom)));border-radius:20px 20px 0 0;background:var(--body);box-shadow:0 -10px 40px -18px rgba(0,0,0,.35)}
 .phone-sheet-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
 .phone-sheet-heading h2{margin:0;font-size:20px;line-height:1.35;overflow-wrap:anywhere}
 .phone-sheet-heading .settings-trigger{min-width:44px;min-height:44px}
@@ -661,6 +661,6 @@ html,body,#root{height:100%;overflow:hidden;overscroll-behavior:none}
  .app-status-bar:not([data-offline]){display:none}
  .app-status-bar[data-offline]>div{display:none}
  .global-settings-dialog[open]{position:fixed;inset:auto;top:var(--app-top,0px);left:0;margin:0;width:100%;height:var(--app-height,100dvh);max-height:var(--app-height,100dvh);display:flex;align-items:flex-end;overflow:hidden}
- .global-settings-dialog .settings-surface{width:100%;max-height:calc(100% - 16px);padding:20px 20px max(20px,var(--app-bottom-inset,env(safe-area-inset-bottom)));border-radius:20px 20px 0 0}
+ .global-settings-dialog .settings-surface{width:100%;max-height:calc(100% - max(16px,env(safe-area-inset-top)));padding:20px 20px max(20px,var(--app-bottom-inset,env(safe-area-inset-bottom)));border-radius:20px 20px 0 0}
  .phone-sheet-surface .settings-trigger{min-width:44px;min-height:44px}
 }
