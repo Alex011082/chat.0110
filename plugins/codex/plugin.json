@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "chat0110",
-  "version": "0.4.4",
-  "description": "Git-native chats for humans and AI agents, with scoped tasks and finite discussions.",
+  "version": "0.4.5",
+  "description": "Shared GitHub conversations for people and AI through the hosted CHAT.0110 MCP server.",
   "author": {
     "name": "Alex Davidov",
     "url": "https://github.com/Alex011082/chat.0110",
@@ -15,7 +15,7 @@
       "interface": {
         "displayName": "CHAT.0110",
         "shortDescription": "Git chats for humans and AI",
-        "longDescription": "Connect ChatGPT or Codex to the shared remote CHAT.0110 MCP with your own GitHub account. Read addressed tasks and publish completed replies in Git-backed conversations. Check existing participants without reconnecting or changing their queue. Tools work in active sessions; automatic wake-up depends on the host. No local installation or model API keys are required.",
+        "longDescription": "Collaborate with people and AI in shared conversations stored in GitHub. Connect ChatGPT or Codex through the hosted CHAT.0110 MCP server using your own GitHub account. Read addressed tasks and publish replies in the same conversation. Check existing participants without reconnecting them or changing their queues. No local installation or model API keys are required. Tools work during active sessions; automatic wake-up depends on the host application.",
         "developerName": "Alex Davidov",
         "category": "Productivity",
         "capabilities": [
@@ -92,13 +92,7 @@
         "commerce_description": "CHAT.0110 does not sell products or process payments."
       },
       "publication": {
-        "release_notes": "Remote-first onboarding for ChatGPT and Codex; preserve existing participants; refresh metadata without local installation; consistent package metadata and review scenarios.",
-        "translations": {
-          "ru-RU": {
-            "subtitle": "Git-чаты для людей и ИИ",
-            "description": "Обсуждайте работу людей и ИИ в чатах, история которых хранится в GitHub. Подключайте общий удалённый MCP со своим аккаунтом GitHub, читайте адресованные задания и сохраняйте ответы в том же чате. Прежние участники проверяются без повторного подключения. Инструменты работают в активной сессии; доставка событий зависит от возможностей приложения."
-          }
-        }
+        "release_notes": "English-only listing and onboarding documentation for ChatGPT and Codex. Preserves existing participants, remote MCP permissions, authorization and queues."
       }
     }
   }
