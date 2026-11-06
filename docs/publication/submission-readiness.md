@@ -1,6 +1,6 @@
-# Публичная подача CHAT.0110 — кандидат 0.4.3
+# Публичная подача CHAT.0110 — кандидат 0.4.4
 
-Техническая подготовка по поручению владельца от 05.11.2026. Не submitted,
+Обновлено 6 ноября 2026 года. Техническая подготовка по поручению владельца. Не submitted,
 не official и не опубликовано. Общий remote-плагин для ChatGPT/Codex, не установка
 программы на Mac. Другие MCP-клиенты требуют отдельной фактической приёмки.
 
@@ -9,7 +9,8 @@
   каждого пользователя, discovery, authorization code/PKCE S256, scope chat:agent.
 - Remote manifests двух форматов, общий setup skill с фактическим host author,
   иконки, support URL, subtitle в лимите30, описание в лимите4000 и перевод RU.
-- Версия0.4.3 согласована. Сборка отвергает рассогласованные версии. Распакованный
+- Кандидат 0.4.4 добавляет утверждённые действующие privacy/terms URL в оба
+  формата manifest. Сборка отвергает рассогласованные версии. Распакованный
   ZIP отдельно проверяется: metadata, SHA/CRC, remote URL, assets, отсутствие
   local/hooks/credentials и импортируемые review cases.
 - 5 positive и 3 negative сценария в extensions.com.openai.review.test_cases
@@ -27,18 +28,22 @@
 Владелец предоставил **Alex Davidov** и публичный контакт
 **alexdavidov127@gmail.com**. Website: https://chat.0110.digital.
 Support URL: https://github.com/Alex011082/chat.0110/issues.
-Это не доказательство publisher identity verification. По read-only проверке
-выбранной Personal Organization в портале verification ещё не запускалась;
-публичная карточка CHAT.0110 там не обнаружена. Это не аудит всех org аккаунта.
+Individual identity в выбранной Personal Organization подтверждена: Approved.
+Портал принял ZIP 0.4.3 и создал plugin
+`plugin_asdk_app_6aeca0c4d2a88191a16cd57ec285b74f`, draft
+`appsub_6aeca0c4d2d881918e7737012f9e4dc8`. Это черновик, не Submit/approval/Publish.
+
+Владелец отдельно утвердил тексты и выпуск PR #29. Merge
+`9f774fe80c516338cbefaeb7c479518282f947c4` выпущен штатным deploy-скриптом.
+Сессия выпуска прочитала публичные https://chat.0110.digital/privacy и
+https://chat.0110.digital/terms: 200, HTML, no-cache; тела совпадают с утверждёнными
+файлами. Plaintext challenge доступен, но успешный Verify Domain ещё не подтверждён.
+Состояние прежнего codex/очереди сохранено; Active off и DNS не менялись.
 
 ## Остаток перед Submit / Publish
-1. Выбрать реальную org/project издателя, подтвердить право подачи и завершить
-   individual или business verification выбранного имени.
-2. Privacy/terms drafts в этой папке — конкретные проекты на утверждение,
-   не действующие страницы. Владелец утверждает фактические retention/logs/
-   backups/deletion правила и тексты. После отдельного разрешения опубликовать
-   реальные HTTPS страницы и указать privacyPolicyURL/termsOfServiceURL в обоих
-   manifests. Сейчас поля намеренно отсутствуют; SPA fallback HTTP200 не политика.
+1. Загрузить новый ZIP 0.4.4 в существующий draft и сверить импорт обоих legal URL.
+   Не создавать дубликат заявки. Privacy/terms в public/ — утверждённый источник;
+   файлы *-draft.md в этой папке сохранены как исторические проекты.
    License optional, её отсутствие не обязательный gate текущего шага.
 3. Создать выделенный reviewer GitHub/account и тестовый repo/chat с минимальными
    правами, прежним участником/очередью и независимым чужим аккаунтом для отказов.
@@ -47,7 +52,7 @@ Support URL: https://github.com/Alex011082/chat.0110/issues.
 4. Реально пройти все 5+3 кейса в целевых ChatGPT/Codex клиентах, зафиксировать
    регистрацию и delivery отдельно. Подготовить доступное reviewer видеодемо;
    demo_recording_url пока не задан. Временных/вымышленных URL нет.
-5. Загрузить финальный ZIP через With MCP, проверить импорт metadata/auth/scopes,
+5. После загрузки финального ZIP проверить импорт metadata/auth/scopes,
    пройти domain-verification challenge выбранной подачи. Точный token берётся
    из портала; домены/Caddy без отдельного разрешения не менять.
 6. Выполнить Scan/Rescan Tools и сверить все8схем: pending.session_id,
@@ -66,5 +71,6 @@ remote MCP/OAuth; доступность в реальном клиенте пр
 - https://developers.openai.com/plugins/deploy/connect-chatgpt#refresh-metadata
 - https://developers.openai.com/plugins/deploy/app-review
 
-Прочитаны 05.11.2026. Подготовка PR не разрешает submission/publication, новый
-deploy, изменение OAuth/identity/очереди, DNS или продуктового Active.
+Прочитаны 05.11.2026. Подготовка 0.4.4 не является отправкой или новым выпуском.
+Порталом и выпуском управляет одна авторизованная сессия; OAuth/identity/очередь,
+DNS и продуктовый Active этим metadata diff не изменяются.

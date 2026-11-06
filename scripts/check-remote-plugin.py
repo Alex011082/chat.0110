@@ -3,6 +3,7 @@
 import hashlib
 import json
 import pathlib
+import re
 import struct
 import shutil
 import sys
@@ -34,11 +35,10 @@ with zipfile.ZipFile(archive) as z:
         assert 0 < len(interface["displayName"]) <= 30
         assert 0 < len(interface["shortDescription"]) <= 30
         assert 0 < len(interface["longDescription"]) <= 4000
-        for key in ["websiteURL", "supportURL"]:
+        for key in ["websiteURL", "supportURL", "privacyPolicyURL", "termsOfServiceURL"]:
             assert interface[key].startswith("https://") and "example.com" not in interface[key]
-        for key in ["privacyPolicyURL", "termsOfServiceURL"]:
-            if key in interface:
-                assert interface[key].startswith("https://") and "example.com" not in interface[key]
+        assert interface["privacyPolicyURL"] == "https://chat.0110.digital/privacy"
+        assert interface["termsOfServiceURL"] == "https://chat.0110.digital/terms"
         for key in ["logo", "composerIcon"]:
             asset = z.read(interface[key].removeprefix("./"))
             assert asset.startswith(b"\x89PNG\r\n\x1a\n")
@@ -46,6 +46,12 @@ with zipfile.ZipFile(archive) as z:
             assert width==height and 48<=width<=4096 and len(asset)<=5*1024*1024
     assert a["review"] == b["review"]
     assert a["publication"] == b["publication"]
+    assert "translations" not in a["publication"], "Public ZIP must use the English base listing only"
+    # Проверяем распакованный результат: генератор тоже может добавить русский документ.
+    for name in names:
+        if name.endswith((".json", ".md", ".txt", ".yaml", ".yml")):
+            text = z.read(name).decode("utf-8")
+            assert not re.search(r"[\u0400-\u04ff]", text), f"Non-English Cyrillic text in public ZIP: {name}"
     review = a["review"]
     assert "test_credentials" not in review and "reviewer_instructions" not in review
     for kind, count in [("positive", 5), ("negative", 3)]:
@@ -65,7 +71,7 @@ with zipfile.ZipFile(archive) as z:
     assert compat["mcpServers"] == "./.mcp.json"
     assert a["onboardingSkill"] == b["onboardingSkill"]
     assert a["onboardingSkill"].removeprefix("./") in names
-receipt={"archive": archive.name, "version": root["version"], "sha256": entry["sha256"], "remote_only": True, "manifest_versions_match": True, "review_cases": {"positive": 5, "negative": 3}, "submitted": False, "review_prerequisites":status["reviewPrerequisites"]}
+receipt={"archive": archive.name, "version": root["version"], "sha256": entry["sha256"], "remote_only": True, "manifest_versions_match": True, "english_base_listing_only": True, "no_cyrillic_packaged_text": True, "listing_lengths": {"subtitle":len(a["interface"]["shortDescription"]),"description":len(a["interface"]["longDescription"])}, "review_cases": {"positive": 5, "negative": 3}, "submitted": False, "review_prerequisites":status["reviewPrerequisites"]}
 if len(sys.argv)>2:
     output=pathlib.Path(sys.argv[2]);output.mkdir(parents=True,exist_ok=True)
     shutil.copy2(archive,output/archive.name)

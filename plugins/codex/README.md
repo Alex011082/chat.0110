@@ -1,42 +1,50 @@
-# CHAT.0110 для ChatGPT и Codex · 0.4.3
+# CHAT.0110 for ChatGPT and Codex · 0.4.5
 
-Кандидат плагина для последующей проверки владельцем. Не официальный, не отправлен
-и не опубликован в каталоге. Remote MCP: https://chat.0110.digital/mcp, минимум 2.1.0.
-Это общий сервер с OAuth каждого пользователя. Локальная установка, Node/npx/Bun/gh
-и отдельный платный API для этого пакета не нужны. ZIP — для ручного импорта
-плагина и подачи издателем, а не установщик программы на компьютер.
+Plugin review candidate: not official, not submitted, not published in the
+directory. Remote MCP: https://chat.0110.digital/mcp, minimum protocol 2.1.0.
+The shared server uses each user's own GitHub OAuth account. This package needs
+no local installation, Node/npx/Bun/gh or separate paid model API. The ZIP is for
+plugin import and publisher submission, not a computer software installer.
 
-Пакет содержит portable plugin.json/mcp.json, compatibility manifest и setup skill.
-Hooks отсутствуют: пакет не включает скрытую службу, новый App Server или новые модели.
-Установка: импортировать ZIP через интерфейс плагинов Codex/ChatGPT, разрешить OAuth
-и выбрать прежнего участника в мастере /connect. Проверка прежней сессии вызывает
-только status с её UUID, без нового connect/rebind/set_auto_reply. Создание нового
-участника — отдельный явный выбор; при неизвестном ID или конфликте alias — остановка.
-В Codex author=codex, в ChatGPT author=chatgpt. Модель не заменяет имя приложения.
+The package includes portable plugin.json/mcp.json, a compatibility manifest and
+the setup skill. It has no hooks, hidden service, new App Server or new models.
+Import the ZIP through the Codex/ChatGPT plugin interface, authorize OAuth and
+select the existing participant in the /connect wizard. Checking an existing
+session calls only status with its UUID, without connect/rebind/set_auto_reply.
+Creating a new participant is a separate explicit choice. Stop on an unknown ID
+or alias conflict. In Codex use author=codex; in ChatGPT use author=chatgpt.
+The model name does not replace the application identity.
 
-Для старой личной связи нужен Refresh её metadata, publisher Rescan — другой
-процесс для опубликованного плагина. Не переустанавливай связь и не отзывай OAuth
-ради отсутствующих полей схемы. Нужны pending.session_id и reply.outcome.
+An older personal connection needs a metadata Refresh. Publisher Rescan is a
+separate process for the published plugin. Do not reinstall the connection or
+revoke OAuth to work around missing schema fields. pending.session_id and
+reply.outcome are required.
 
-Remote MCP даёт инструменты чтения, ответа и scoped status/control. Он сам не
-пробуждает локальный Codex: нужен живой host-адаптер (описан в docs/codex-host-pilot.md
-репозитория). Пакет не объявляет эту способность установленной. Пятьминутного
-модельного опроса нет. MCP Events поддерживается только на документированных
-поверхностях; не подменять author на chatgpt ради получения callback.
+Remote MCP provides read, reply and scoped status/control tools. It does not
+wake idle local Codex on its own: a live host adapter is needed (described in
+docs/codex-host-pilot.md in the repository). This package does not claim that
+capability is installed. There is no periodic model polling. MCP Events is
+supported only on documented host surfaces; never change author to chatgpt
+just to obtain a callback.
 
-Для reviewer: READ/WRITE — только разрешённые чаты GitHub пользователя; scope chat:agent,
-вход OAuth, secrets в пакете нет. Stop отменяет прежние цепочки; повтор требует тех
-же text/outcome. Прямые GitHub-записи обходят CHAT.0110 DLP. История Git не стирается.
+Reviewer access: READ/WRITE only within the user's authorized GitHub chats;
+scope chat:agent, OAuth login, no packaged secrets. Stop cancels prior chains;
+an exact retry must keep the same text/outcome. Direct GitHub writes bypass
+CHAT.0110 data protection. Removing the plugin does not erase Git history.
 
-Перед submission нужны подтверждённые publisher/eligibility, согласованные владельцем
-публичные privacy/terms URL, test account и чистая установка на настоящем клиенте.
-Эти материалы не заменены заглушками. License optional для текущего шага подачи.
-Имя/контакт предоставлены владельцем: Alex Davidov, alexdavidov127@gmail.com;
-это не доказательство identity verification. Пять positive и три negative review
-сценария включены, но ещё не пройдены в reviewer-аккаунте; CI их не заменяет.
-Credentials вводятся только в защищённую форму портала. Полный остаток и проекты
-политик: docs/publication/submission-readiness.md в исходном репозитории.
-Источник/досье: https://github.com/Alex011082/chat.0110, plugins/REVIEW.md.
+The owner provided publisher/contact details: Alex Davidov,
+alexdavidov127@gmail.com. Identity verification is separate from this package.
+Public privacy and terms URLs are included. Five positive and three negative
+review scenarios are included; they have not all passed real reviewer-account
+acceptance, and CI does not replace that acceptance. Credentials belong only
+in the secure portal form, never the ZIP or repository.
 
-English: review candidate, not official. OAuth tools work only in permitted chats.
-Local automatic wake requires a live host adapter; MCP installation alone is insufficient.
+Version 0.4.5 updates the English listing and documentation only. MCP URL,
+permissions, authorization, tools and queues are unchanged. Public historical
+video: https://github.com/Alex011082/chat.0110/releases/tag/review-demo-pr206-20261106
+This replay is not evidence of live model execution or all reviewer test cases.
+Reviewer credentials remain a submission prerequisite. License is optional for
+the current submission step. See docs/publication/submission-readiness.md for
+the source dossier; live portal state must be checked separately.
+
+Source: https://github.com/Alex011082/chat.0110. Review notes: REVIEW.md.
