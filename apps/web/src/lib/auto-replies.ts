@@ -16,7 +16,7 @@ export type AutoReplyView = DispatchView & {
 };
 export function agentConnectionLabel(session:AgentSession,view:AutoReplyView,en:boolean):string{
  const state=agentDeliveryState(session,view);
- return state==="working"?(en?"Answering in this chat":"Отвечает в этом чате"):state==="waiting"?(en?"Connected to this chat":"Подключён к этому чату"):state==="off"?(en?"Automatic replies are off":"Автоответы выключены"):(en?"Enabled; this chat's receiver is offline":"Включены; приёмник этого чата не подключён");
+ return state==="working"?(en?"Answering":"Отвечает"):state==="waiting"?(en?"Receiving mentions":"Получает обращения"):state==="off"?(en?"Paused":"Приостановлен"):(en?"Needs connection":"Нужно подключить");
 }
 export function agentSessionName(session:AgentSession):string{
  const kind=canonicalMention(session.author),brand=kind==="claude"?"Claude":kind==="codex"?"Codex":kind==="chatgpt"?"ChatGPT":kind==="grok"?"Grok":session.author;

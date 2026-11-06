@@ -4,12 +4,14 @@ import { PrivacyPanel } from "./PrivacyPanel.tsx";
 import { canonicalMention, mentionRoute, resolveMention, suggestMentions, type DispatchView } from "@chat0110/chat-protocol";
 import { dispatchRequest, dispatchText } from "../dispatch.ts";
 import type { MessageItem } from "@chat0110/chat-protocol";
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { excerpt } from "../lib/text.ts";
 import { s } from "../strings.ts";
 import { ActionKey, ActionRound, Body, cx, SLOT } from "../ui/kit.tsx";
 import {drafts} from "../lib/drafts.ts";
 import {useOnline} from "../lib/pwa.ts";
+import {Sheet} from "../ui/Sheet.tsx";
+import {CloseIcon,SendIcon} from "../ui/icons.tsx";
 
 // Черновики живут, пока открыта вкладка: переход в другой чат их не теряет.
 
@@ -25,6 +27,8 @@ interface ComposerProps {
   focusTick: number;
   /** Светлый дизайн: подсказка про @ — в самом поле, ветка — во всплывающей подсказке. */
   light?: boolean | undefined;
+  panel?:"privacy"|"tasks"|null;
+  onClosePanel?:()=>void;
 }
 
 export function Composer(p: ComposerProps) {
@@ -33,6 +37,7 @@ export function Composer(p: ComposerProps) {
   const online=useOnline();
   useEffect(()=>{drafts.set(p.chatKey,text,p.reply?.id);},[p.reply?.id,p.chatKey,text]);
   const area = useRef<HTMLTextAreaElement>(null);
+  const panelId=useId();
   const {data:dispatch,error:dispatchError,setView:setDispatch}=useAgentConnections(p.chatKey);
   const [stopError, setStopError] = useState(false);
   const [cursor, setCursor] = useState(text.length);
@@ -83,12 +88,6 @@ export function Composer(p: ComposerProps) {
     >
       {d.connect} ↗
     </a>
-  );
-  const helpRow = (
-    <div id="mention-help" className="flex flex-wrap items-center justify-between gap-2 text-cap text-ink-2">
-      <span>{d.help}</span>
-      {connectLink}
-    </div>
   );
   const routePanel = (
     <div className="flex flex-col gap-1.5 text-cap text-ink-2 empty:hidden">
@@ -142,10 +141,10 @@ export function Composer(p: ComposerProps) {
           → ■
         </span>
       ) : null}
-      {dispatch && !dispatch.sessions.length ? <span>{d.empty}</span> : null}
+      {dispatch && !dispatch.sessions.length && (!p.phone||route.length>0) ? <span>{d.empty}</span> : null}
       {(dispatch?.chains ?? [])
-        .filter((c) => !["done", "cancelled"].includes(c.status))
-        .slice(0, 5)
+        .filter((c) => !["done", "cancelled",...(p.phone?["expired"]:[])].includes(c.status))
+        .slice(0, p.phone?1:5)
         .map((chain) => (
           <div key={chain.id} className="flex items-center justify-between gap-2">
             <span>
@@ -240,7 +239,7 @@ export function Composer(p: ComposerProps) {
         rows={1}
         value={text}
         disabled={!p.canPush || sending}
-        placeholder={p.light ? s.design.placeholder : s.composer.placeholder}
+        placeholder={p.phone?(s.locale==="en"?"Message · @participant":"Сообщение · @участник"):p.light ? s.design.placeholder : s.composer.placeholder}
         title={p.light && p.canPush ? s.composer.hint(p.branch) : undefined}
         onChange={(e) => {
           update(e.target.value);
@@ -263,21 +262,27 @@ export function Composer(p: ComposerProps) {
 
   if (p.phone) {
     return (
+      <>
       <form
         onSubmit={onSubmit}
-        className="flex shrink-0 flex-col gap-2 border-t border-line bg-rail px-3.5 pt-3.5 pb-[max(18px,env(safe-area-inset-bottom))]"
+        className="mobile-composer"
       >
+        <span id="mention-help" className="sr-only-text">{d.help}</span>
         {replyChip}
-        {helpRow}
         {routePanel}
         {checkingHint}
-        <PrivacyPanel chatKey={p.chatKey} text={text} onApply={update} />
         {!p.canPush ? <p className="m-0 px-1 text-cap text-ink-2">{s.composer.readOnly}</p> : null}
         <div className="flex items-end gap-2.5">
           {field}
-          <ActionRound type="submit" aria-label={s.composer.send} disabled={!p.canPush || !online || !!routingError || sending} />
+          <ActionRound type="submit" className="mobile-send" aria-label={s.composer.send} disabled={!text.trim() || !p.canPush || !online || !!routingError || sending}><SendIcon size={22}/></ActionRound>
         </div>
       </form>
+      <Sheet open={!!p.panel} phone onClose={()=>p.onClosePanel?.()} labelledBy={panelId} dismissOnBackdrop>
+       <section className="phone-sheet-surface"><header className="phone-sheet-heading"><h2 id={panelId}>{p.panel==="privacy"?(s.locale==="en"?"Data protection":"Защита данных"):(s.locale==="en"?"Tasks in this chat":"Задания в этом чате")}</h2><button type="button" className="settings-trigger" aria-label={s.locale==="en"?"Close":"Закрыть"} onClick={()=>p.onClosePanel?.()}><CloseIcon/></button></header>
+       {p.panel==="privacy"?<PrivacyPanel chatKey={p.chatKey} text={text} onApply={update} expanded/>:<div className="flex flex-col gap-3">{!dispatch?<p role="status">{d.unavailable}</p>:dispatch.chains.length?dispatch.chains.map(chain=><div key={chain.id} className="task-history-row"><span>{chain.route.map(id=>dispatch.sessions.find(session=>session.id===id)?.name??"?").join(" → ")}</span><span className="text-cap text-ink-2">{d.status[chain.status]}</span></div>):<p>{s.locale==="en"?"No tasks yet":"Пока нет заданий"}</p>}</div>}
+       </section>
+      </Sheet>
+      </>
     );
   }
 

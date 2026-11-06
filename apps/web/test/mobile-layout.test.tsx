@@ -22,7 +22,8 @@ test("мобильное поле сохраняет ввод и кнопку, �
  setLocale("ru");
  const html=renderToStaticMarkup(<Composer chatKey="a/b/20261106-abcd" branch="chat/20261106-abcd" canPush reply={null} onClearReply={()=>{}} onSend={()=>{}} phone focusTick={0}/>);
  expect(html).toContain("<textarea");expect(html).toContain('aria-label="Отправить"');
- expect(html).not.toContain("Подключить ИИ");expect(html).not.toContain("Защита данных · включена");expect(html).not.toContain("@@ обсудить");
+ expect(html).not.toContain("Подключить ИИ");expect(html).not.toContain("Защита данных · включена");
+ expect(html).toContain('id="mention-help" class="sr-only-text"');
 });
 
 test("готовность участника названа кратко и не выводится из online",()=>{
@@ -34,7 +35,7 @@ test("готовность участника названа кратко и н�
 });
 
 test("поиск репозиториев учитывает владельца и имя, недавние чужие записи не раскрываются",()=>{
- const repos=[{full_name:"Owner/Website",owner:"Owner",name:"Website",can_push:true},{full_name:"Team/API",owner:"Team",name:"API",can_push:false}];
+ const repos=[{full_name:"Owner/Website",owner:"Owner",name:"Website",can_push:true,private:true,default_branch:"main",installation_id:1},{full_name:"Team/API",owner:"Team",name:"API",can_push:false,private:false,default_branch:"main",installation_id:2}];
  expect(findRepositories(repos,"web",["foreign/private","Team/API"]).all.map(r=>r.full_name)).toEqual(["Owner/Website"]);
  expect(findRepositories(repos,"",["foreign/private","Team/API","Team/API"]).recent.map(r=>r.full_name)).toEqual(["Team/API"]);
  expect(findRepositories(repos,"TEAM",[]).all.map(r=>r.full_name)).toEqual(["Team/API"]);

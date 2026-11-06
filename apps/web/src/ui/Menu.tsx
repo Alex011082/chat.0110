@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { cx } from "./kit.tsx";
+import {Sheet} from "./Sheet.tsx";
+import {CloseIcon} from "./icons.tsx";
 
 export type MenuItem =
   | {
@@ -27,6 +29,7 @@ export function Menu({
   align = "right",
   up = false,
   className,
+  phone=false,
 }: {
   label: string;
   trigger: ReactNode;
@@ -35,6 +38,7 @@ export function Menu({
   /** Открываться вверх — у кнопки внизу экрана. */
   up?: boolean;
   className?: string;
+  phone?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -57,6 +61,15 @@ export function Menu({
   }, [open]);
 
   const row = "flex min-h-9 w-full items-center rounded-[8px] px-3 text-left text-key text-ink no-underline hover:bg-screen hover:text-ink";
+  const contents=(
+        <div
+          id={id}
+          role="menu"
+          className={phone?"phone-menu-items":cx("absolute z-30 flex w-max min-w-52 flex-col gap-0.5 rounded-[12px] bg-body p-1.5 plinth-sheet",align === "right" ? "right-0" : "left-0",up ? "bottom-full mb-2" : "top-full mt-2")}
+        >
+          {items.map((item,i)=>item.kind==="node"?<div key={i} className="px-3 py-1.5">{item.node}</div>:item.kind==="link"?<a key={i} role="menuitem" href={item.href} className={row} {...(item.external?{target:"_blank",rel:"noopener noreferrer"}:{})} onClick={()=>setOpen(false)}>{item.label}</a>:<button key={i} type="button" role="menuitem" title={item.title} disabled={item.disabled} className={cx(row,"border-0 bg-transparent disabled:cursor-default disabled:text-ink-3 disabled:hover:bg-transparent",!!(item.hint||item.icon)&&"gap-3 py-2")} onClick={()=>{setOpen(false);item.onClick();}}>{item.icon}{item.hint?<span className="flex min-w-0 flex-col"><span className="font-semibold">{item.label}</span><span className="text-cap text-ink-2">{item.hint}</span></span>:item.label}</button>)}
+        </div>
+  );
   return (
     <div ref={root} className={cx("relative", className)}>
       <button
@@ -67,67 +80,11 @@ export function Menu({
         aria-expanded={open}
         aria-controls={open ? id : undefined}
         onClick={() => setOpen((o) => !o)}
-        className="flex size-8 items-center justify-center rounded-[8px] border-0 bg-transparent text-[18px] leading-none text-ink-2 hover:bg-screen hover:text-ink"
+        className={cx("flex size-8 items-center justify-center rounded-[8px] border-0 bg-transparent text-[18px] leading-none text-ink-2 hover:bg-screen hover:text-ink",phone&&"mobile-menu-trigger")}
       >
         {trigger}
       </button>
-      {open ? (
-        <div
-          id={id}
-          role="menu"
-          className={cx(
-            "absolute z-30 flex w-max min-w-52 flex-col gap-0.5 rounded-[12px] bg-body p-1.5 plinth-sheet",
-            align === "right" ? "right-0" : "left-0",
-            up ? "bottom-full mb-2" : "top-full mt-2",
-          )}
-        >
-          {items.map((item, i) =>
-            item.kind === "node" ? (
-              <div key={i} className="px-3 py-1.5">
-                {item.node}
-              </div>
-            ) : item.kind === "link" ? (
-              <a
-                key={i}
-                role="menuitem"
-                href={item.href}
-                className={row}
-                {...(item.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
-                onClick={() => setOpen(false)}
-              >
-                {item.label}
-              </a>
-            ) : (
-              <button
-                key={i}
-                type="button"
-                role="menuitem"
-                title={item.title}
-                disabled={item.disabled}
-                className={cx(
-                  row,
-                  "border-0 bg-transparent disabled:cursor-default disabled:text-ink-3 disabled:hover:bg-transparent",
-                  !!(item.hint || item.icon) && "gap-3 py-2",
-                )}
-                onClick={() => {
-                  setOpen(false);
-                  item.onClick();
-                }}
-              >
-                {item.icon}
-                {item.hint ? (
-                  <span className="flex min-w-0 flex-col">
-                    <span className="font-semibold">{item.label}</span>
-                    <span className="text-cap text-ink-2">{item.hint}</span>
-                  </span>
-                ) : (
-                  item.label
-                )}
-              </button>
-            ),
-          )}
-        </div>
-      ) : null}
+      {phone?<Sheet open={open} phone onClose={()=>setOpen(false)} label={label} dismissOnBackdrop><section className="phone-sheet-surface"><header className="phone-sheet-heading"><h2>{label}</h2><button type="button" className="settings-trigger" aria-label="Close / Закрыть" onClick={()=>setOpen(false)}><CloseIcon/></button></header>{contents}</section></Sheet>:open?contents:null}
     </div>
   );
 }

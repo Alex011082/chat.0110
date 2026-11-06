@@ -38,6 +38,7 @@ import { useDesign } from "../lib/design.ts";
 import { DecisionCard, OutgoingProposals, type DecisionHandler } from "./DecisionCard.tsx";
 
 export interface TimelineProps {
+  compact?:boolean;
   hasMore?:boolean;
   checking?:number;
   checkFailed?:boolean;
@@ -475,7 +476,7 @@ function Message({ m, first, published, ctx }: { m: MessageItem; first: boolean;
   // Светлый: в строке — имя и время, остальное (агент, от чьего имени, файл,
   // «опубликовано») — во всплывающей подсказке времени. Длинный ответ агента
   // свёрнут; глубокая ссылка на него разворачивает.
-  const light = useDesign() === "light";
+  const light = useDesign() === "light" || ctx.compact;
   const long = light && isAgent(m.author) && m.text.length > CLAMP_CHARS;
   const [expanded, setExpanded] = useState(false);
   const clamped = long && !expanded && !flashing;

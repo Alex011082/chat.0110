@@ -9,6 +9,7 @@ interface SheetProps {
   /** Щелчок по затемнению закрывает (панель «О чате»), но не форму с текстом. */
   dismissOnBackdrop?: boolean;
   className?: string;
+  phone?: boolean;
   children: ReactNode;
 }
 
@@ -16,7 +17,7 @@ interface SheetProps {
  * Лист поверх затемнения на родном <dialog>: showModal даёт ловушку фокуса,
  * Escape и инертный фон без самодельного кода; фокус возвращается сам.
  */
-export function Sheet({ open, onClose, labelledBy, label, dismissOnBackdrop, className, children }: SheetProps) {
+export function Sheet({ open, onClose, labelledBy, label, dismissOnBackdrop, className, children, phone }: SheetProps) {
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -42,7 +43,7 @@ export function Sheet({ open, onClose, labelledBy, label, dismissOnBackdrop, cla
       onClick={(e) => {
         if (dismissOnBackdrop && e.target === ref.current) onClose();
       }}
-      className={cx("max-h-none max-w-none overflow-visible border-0 bg-transparent p-0 text-ink", className)}
+      className={cx("max-h-none max-w-none overflow-visible border-0 bg-transparent p-0 text-ink", className,phone&&"phone-sheet")}
     >
       {open ? children : null}
     </dialog>
