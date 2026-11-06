@@ -16,11 +16,13 @@ test("готовность приёмника важнее недавней ак
  expect(agentConnectionLabel(session,view,false)).toContain("приёмник этого чата не подключён");
  expect(agentConnectionLabel({...session,online:false,delivery_ready:true},view,false)).toBe("Подключён к этому чату");
 });
-test("мастер сразу содержит точную привязку, MCP-команду и запрос участия",()=>{
+test("мастер показывает общий удалённый адрес без команды локальной установки",()=>{
  setLocale("ru");
  const html=renderToStaticMarkup(<ConnectAgents embedded chatContext={{repo:"owner/product",chat_id:"20261103-abcd"}} initialClient="claude-code"/>);
  expect(html).toContain("owner/product");expect(html).toContain("20261103-abcd");
- expect(html).toContain("chat0110 setup --client claude-code");
+ expect(html).toContain("https://chat.0110.digital/mcp");
+ expect(html).not.toContain("chat0110 setup --client");
+ expect(html).toContain("Установка на компьютер не нужна");
  expect(html).toContain("Скопировать запрос для этой сессии");
  expect(html).not.toContain("Скачать Claude Code");
 });

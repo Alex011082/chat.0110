@@ -3,7 +3,6 @@ import {
   type AgentSession,
   type DispatchView,
 } from "@chat0110/chat-protocol";
-import { agentCards, participationTask } from "./agent-catalog.ts";
 import {mockRequested} from "../api.ts";
 import {demoAutoReply} from "../dispatch.ts";
 
@@ -29,10 +28,6 @@ export function agentDeliveryState(session: AgentSession, view: AutoReplyView): 
   const listening = canonicalMention(session.author) === "chatgpt" ? view.chatgpt?.connected : session.delivery_ready;
   return listening ? "waiting" : "waiting_transport";
 }
-// Личный плагин владельца CHAT.0110. Ссылка открывает Work с готовым запросом,
-// а состояние «на связи» приходит только после настоящей подписки MCP Events.
-const CHATGPT_PLUGIN =
-  "https://chatgpt.com/plugins/plugin_asdk_app_6ae004bca1008191b9ce93dfbb9116a0";
 export function sessionsForAuthor(
   sessions: AgentSession[],
   author: string,
@@ -49,19 +44,6 @@ export function autoReplyLaunchUrl(
   en: boolean,
 ): string {
   const canonical = canonicalMention(author);
-  if (canonical === "chatgpt") {
-    const card = agentCards(en)[0]!;
-    const prompt =
-      (en
-        ? `Enable CHAT.0110 automatic replies for ${repo}, chat ${chatId}. `
-        : `Включи автоответы CHAT.0110 для ${repo}, чат ${chatId}. `) +
-      participationTask(card, en, { repo, chat_id: chatId });
-    const url = new URL(CHATGPT_PLUGIN);
-    url.searchParams.set("install", "");
-    url.searchParams.set("surface", "work");
-    url.searchParams.set("prompt", prompt);
-    return url.toString();
-  }
   const query = new URLSearchParams({ repo, chat: chatId });
   return `/connect?${query}#${canonical === "claude" ? "claude-code" : canonical}`;
 }

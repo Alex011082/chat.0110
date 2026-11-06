@@ -40,13 +40,15 @@ test("инструкции карточек сохраняют точный alia
   }
 });
 
-test("запуск автоответов открывает Work с готовым заданием вместо копирования", async () => {
+test("общее подключение сохраняет контекст чата без личного plugin ID владельца", async () => {
   const { autoReplyLaunchUrl, sessionsForAuthor } = await import("../../web/src/lib/auto-replies.ts");
-  const url = new URL(autoReplyLaunchUrl("Alex011082/terminal0110", "20261026-oxo7", "чатжпт", false));
-  expect(url.origin).toBe("https://chatgpt.com");
-  expect(url.searchParams.get("surface")).toBe("work");
-  expect(url.searchParams.get("prompt")).toContain("chat0110.turn.ready");
-  expect(url.searchParams.get("prompt")).toContain("20261026-oxo7");
+  const url = new URL(autoReplyLaunchUrl("Alex011082/terminal0110", "20261026-oxo7", "чатжпт", false),"https://chat.0110.digital");
+  expect(url.origin).toBe("https://chat.0110.digital");
+  expect(url.pathname).toBe("/connect");
+  expect(url.searchParams.get("repo")).toBe("Alex011082/terminal0110");
+  expect(url.searchParams.get("chat")).toBe("20261026-oxo7");
+  expect(url.hash).toBe("#chatgpt");
+  expect(url.href).not.toContain("plugin_asdk");
   expect(sessionsForAuthor([{ id:"a", alias:"claude-code", author:"claude", name:"Claude Code", model:"sonnet", online:false }], "Клоду")).toHaveLength(1);
 });
 

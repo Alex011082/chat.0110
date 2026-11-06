@@ -1,12 +1,15 @@
 {
   "status": "not-submitted",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "serverMinimum": "2.1.0",
   "official": false,
   "reviewPrerequisites": [
-    "publisher identity and account eligibility",
+    "verified publisher identity and publishing permissions",
+    "domain verification for the public MCP endpoint",
     "owner-approved public privacy and terms URLs",
-    "clean installation and real client acceptance"
+    "dedicated reviewer account and seeded test chat",
+    "reviewer-accessible demo video",
+    "real acceptance of all five positive and three negative cases"
   ],
-  "automaticDelivery": "requires-active-host-adapter"
+  "automaticDelivery": "remote-tools-active-session; event-delivery-depends-on-host"
 }
